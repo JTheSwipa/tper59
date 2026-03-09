@@ -77,7 +77,7 @@ function minsToTime(m) { const h = Math.floor(m / 60); const min = m % 60; retur
 function minsNow() { const { h, m } = getNow(); return h * 60 + m; }
 function isWeekday() { const d = getNow().day; return d >= 1 && d <= 5; }
 function isSaturday() { return getNow().day === 6; }
-function dayPrefix() { return getNow().day === 6 ? "sat" : "wd"; }
+function dayPrefix() { const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]; return days[getNow().day]; }
 
 const CAPACITY = 40;
 
