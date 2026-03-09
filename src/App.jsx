@@ -7,7 +7,17 @@ const APP_PASSWORD = "unibo2025";
 const SUPABASE_URL = "https://kegaybjxbcvxtkflmdxe.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QpN9v-S3sO-qQB616TtKNg_TohRlPGl";
 
+function todayDate() {
+  return new Date().toISOString().split("T")[0]; // "2026-03-10"
+}
+
+function getDayName() {
+  const days = ["sun","mon","tue","wed","thu","fri","sat"];
+  return days[new Date().getDay()];
+}
+
 async function sbUpsert(table, id, payload) {
+  const date = todayDate();
   await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
     method: "POST",
     headers: {
@@ -16,7 +26,7 @@ async function sbUpsert(table, id, payload) {
       "Content-Type": "application/json",
       Prefer: "resolution=merge-duplicates",
     },
-    body: JSON.stringify({ id, ...payload }),
+    body: JSON.stringify({ id, date, ...payload }),
   });
 }
 
@@ -27,7 +37,14 @@ async function sbGetAll(table) {
   return await r.json();
 }
 
-// Baseline trip durations in minutes from schedule
+async function sbGetToday(table) {
+  const date = todayDate();
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?date=eq.${date}&select=*`, {
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  });
+  return await r.json();
+}
+
 const BASELINE_TRIP = {
   "to": { "07:15":10,"08:10":10,"08:40":10,"09:10":10,"09:40":10,"12:45":10,"13:45":10,"14:15":10,"14:45":10,"16:45":15,"17:20":20,"17:45":20,"18:10":20,"18:45":15,"20:00":10 },
   "from": { "07:25":10,"08:20":10,"08:50":10,"09:20":10,"09:50":10,"13:10":10,"13:55":10,"14:25":10,"14:55":10,"17:10":20,"17:30":20,"17:40":20,"18:10":20,"18:20":20,"18:30":15,"19:10":10,"20:10":10 }
@@ -73,11 +90,10 @@ const SAT_FROM_VILLA = [
 
 function getNow() { const n = new Date(); return { h: n.getHours(), m: n.getMinutes(), day: n.getDay() }; }
 function timeToMins(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
-function minsToTime(m) { const h = Math.floor(m / 60); const min = m % 60; return `${String(h).padStart(2,"0")}:${String(min).padStart(2,"0")}`; }
+function minsToTime(m) { const h = Math.floor(m/60); const min = m%60; return `${String(h).padStart(2,"0")}:${String(min).padStart(2,"0")}`; }
 function minsNow() { const { h, m } = getNow(); return h * 60 + m; }
 function isWeekday() { const d = getNow().day; return d >= 1 && d <= 5; }
 function isSaturday() { return getNow().day === 6; }
-function dayPrefix() { const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]; return days[getNow().day]; }
 
 const CAPACITY = 40;
 
@@ -89,47 +105,68 @@ function occupancyInfo(count, double) {
   return { label: "Full", color: "#fff", dot: "🔴" };
 }
 
-function getPrediction(history, double) {
-  if (!history || history.total_reports < 3) return null;
-  const cap = double ? CAPACITY * 2 : CAPACITY;
-  const { more_crowded, less_crowded, total_reports } = history;
-  const score = (more_crowded - less_crowded) / total_reports;
+// Aggregate all historical rows for this slot + day-of-week
+function getPrediction(historyRows, slotId, double) {
+  const day = getDayName();
+  // Filter to same slot and same day of week across all dates
+  const relevant = historyRows.filter(r =>
+    r.id === slotId && new Date(r.date).getDay() === new Date().getDay()
+  );
+  if (relevant.length === 0) return null;
+  const totals = relevant.reduce((acc, r) => ({
+    more_crowded: acc.more_crowded + (r.more_crowded || 0),
+    less_crowded: acc.less_crowded + (r.less_crowded || 0),
+    total_reports: acc.total_reports + (r.total_reports || 0),
+  }), { more_crowded: 0, less_crowded: 0, total_reports: 0 });
+
+  if (totals.total_reports < 3) return null;
+  const score = (totals.more_crowded - totals.less_crowded) / totals.total_reports;
   const predictedPct = Math.max(0.05, Math.min(0.98, 0.35 + score * 0.55));
-  if (predictedPct < 0.4) return { label: "Likely comfortable", dot: "🟢", color: "#4ade80", pct: predictedPct };
-  if (predictedPct < 0.75) return { label: "Likely busy", dot: "🟡", color: "#facc15", pct: predictedPct };
-  return { label: "Likely full", dot: "🔴", color: "#f87171", pct: predictedPct };
+  const totalReports = totals.total_reports;
+  if (predictedPct < 0.4) return { label: "Likely comfortable", dot: "🟢", color: "#4ade80", pct: predictedPct, totalReports };
+  if (predictedPct < 0.75) return { label: "Likely busy", dot: "🟡", color: "#facc15", pct: predictedPct, totalReports };
+  return { label: "Likely full", dot: "🔴", color: "#f87171", pct: predictedPct, totalReports };
 }
 
-function getReliability(history) {
-  if (!history || history.total_reports < 3) return null;
-  const { no_show, two_buses, total_reports } = history;
-  const score = Math.round(((total_reports - no_show - two_buses) / total_reports) * 10);
+function getReliability(historyRows, slotId) {
+  const relevant = historyRows.filter(r =>
+    r.id === slotId && new Date(r.date).getDay() === new Date().getDay()
+  );
+  if (relevant.length === 0) return null;
+  const totals = relevant.reduce((acc, r) => ({
+    no_show: acc.no_show + (r.no_show || 0),
+    two_buses: acc.two_buses + (r.two_buses || 0),
+    total_reports: acc.total_reports + (r.total_reports || 0),
+  }), { no_show: 0, two_buses: 0, total_reports: 0 });
+  if (totals.total_reports < 3) return null;
+  const score = Math.round(((totals.total_reports - totals.no_show - totals.two_buses) / totals.total_reports) * 10);
   if (score >= 8) return { score, label: `${score}/10 reliable`, color: "#4ade80", icon: "✓" };
   if (score >= 5) return { score, label: `${score}/10 reliable`, color: "#facc15", icon: "⚠" };
   return { score, label: `${score}/10 reliable`, color: "#f87171", icon: "✗" };
 }
 
-function getETA(arrivalData, direction, time) {
+function getETA(arrivalRows, slotId, direction, time) {
   const baseline = BASELINE_TRIP[direction]?.[time] || 10;
+  const relevant = arrivalRows.filter(r =>
+    r.id === slotId && new Date(r.date).getDay() === new Date().getDay()
+  );
   let avgDelay = 0, avgTrip = baseline;
-  if (arrivalData) {
-    if (arrivalData.delay_report_count >= 2)
-      avgDelay = Math.round(arrivalData.total_delay_minutes / arrivalData.delay_report_count);
-    if (arrivalData.trip_report_count >= 2)
-      avgTrip = Math.round(arrivalData.total_trip_minutes / arrivalData.trip_report_count);
-  }
+  const totalDelayReports = relevant.reduce((a, r) => a + (r.delay_report_count || 0), 0);
+  const totalTripReports = relevant.reduce((a, r) => a + (r.trip_report_count || 0), 0);
+  const totalDelayMins = relevant.reduce((a, r) => a + (r.total_delay_minutes || 0), 0);
+  const totalTripMins = relevant.reduce((a, r) => a + (r.total_trip_minutes || 0), 0);
+  if (totalDelayReports >= 2) avgDelay = Math.round(totalDelayMins / totalDelayReports);
+  if (totalTripReports >= 2) avgTrip = Math.round(totalTripMins / totalTripReports);
   const scheduledMins = timeToMins(time);
   const estArrivalAtStop = scheduledMins + avgDelay;
   const estArrivalAtEnd = estArrivalAtStop + avgTrip;
-  const hasRealData = arrivalData && (arrivalData.delay_report_count >= 2 || arrivalData.trip_report_count >= 2);
   return {
-    avgDelay,
-    avgTrip,
+    avgDelay, avgTrip,
     estArrivalAtStop: minsToTime(estArrivalAtStop),
     estArrivalAtEnd: minsToTime(estArrivalAtEnd),
-    hasRealData,
-    delayReports: arrivalData?.delay_report_count || 0,
-    tripReports: arrivalData?.trip_report_count || 0,
+    hasRealData: totalDelayReports >= 2 || totalTripReports >= 2,
+    delayReports: totalDelayReports,
+    tripReports: totalTripReports,
     baseline,
   };
 }
@@ -140,7 +177,6 @@ const FEEDBACK_OPTIONS = [
   { id: "two_buses", label: "Two buses came 🚌🚌", icon: "🚌" },
   { id: "no_show", label: "Bus didn't show up 👻", icon: "👻" },
 ];
-
 const DELAY_OPTIONS = [0, 5, 10, 15, 20];
 
 function LockScreen({ onUnlock }) {
@@ -190,11 +226,11 @@ export default function App() {
   const [direction, setDirection] = useState("to");
   const [counts, setCounts] = useState({});
   const [feedbacks, setFeedbacks] = useState({});
-  const [history, setHistory] = useState({});
-  const [arrivals, setArrivals] = useState({});
+  const [historyRows, setHistoryRows] = useState([]);
+  const [arrivalRows, setArrivalRows] = useState([]);
   const [myBus, setMyBus] = useState(null);
   const [feedbackOpen, setFeedbackOpen] = useState(null);
-  const [etaOpen, setEtaOpen] = useState(null); // "delay" | "trip" | null, keyed by buskey
+  const [etaOpen, setEtaOpen] = useState(null);
   const [myFeedbacks, setMyFeedbacks] = useState({});
   const [toast, setToast] = useState(null);
   const [tick, setTick] = useState(0);
@@ -213,11 +249,8 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Sync across tabs
   useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === "mybus59") setMyBus(e.newValue || null);
-    };
+    const onStorage = (e) => { if (e.key === "mybus59") setMyBus(e.newValue || null); };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
@@ -226,18 +259,19 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [countRows, fbRows, histRows, arrivalRows] = await Promise.all([
-        sbGetAll("bus_counts"),
-        sbGetAll("bus_feedbacks"),
-        sbGetAll("bus_history"),
-        sbGetAll("bus_arrivals"),
+      const [countRows, fbRows, histRows, arrRows] = await Promise.all([
+        sbGetToday("bus_counts"),
+        sbGetToday("bus_feedbacks"),
+        sbGetAll("bus_history"),   // all dates for predictions
+        sbGetAll("bus_arrivals"),  // all dates for ETA averages
       ]);
-      const c = {}, f = {}, h = {}, a = {};
+      const c = {}, f = {};
       countRows.forEach(r => c[r.id] = { count: r.count });
       fbRows.forEach(r => f[r.id] = r.data);
-      histRows.forEach(r => h[r.id] = r);
-      arrivalRows.forEach(r => a[r.id] = r);
-      setCounts(c); setFeedbacks(f); setHistory(h); setArrivals(a);
+      setCounts(c);
+      setFeedbacks(f);
+      setHistoryRows(histRows);
+      setArrivalRows(arrRows);
     } catch (e) { console.error(e); }
   }, []);
 
@@ -265,8 +299,7 @@ export default function App() {
 
   const cKey = (time) => `${direction}:${time}`;
   const fKey = (time) => `fb:${direction}:${time}`;
-  const hKey = (time) => `${dayPrefix()}:${direction}:${time}`;
-  const aKey = (time) => `${dayPrefix()}:${direction}:${time}`;
+  const slotId = (time) => `${direction}:${time}`;
 
   const toggleBus = async (time) => {
     const key = cKey(time);
@@ -295,17 +328,22 @@ export default function App() {
 
   const submitFeedback = async (time, fbId) => {
     const key = fKey(time);
-    const hkey = hKey(time);
+    const sid = slotId(time);
     const myFbKey = `${direction}:${time}`;
     const alreadyMine = myFeedbacks[myFbKey] === fbId;
     const existing = feedbacks[key] || {};
     const updated = { ...existing };
-    const currentHistory = history[hkey] || { more_crowded:0,less_crowded:0,no_show:0,two_buses:0,total_reports:0 };
-    const updatedHistory = { ...currentHistory };
+
+    // Find today's history row for this slot
+    const today = todayDate();
+    const todayHist = historyRows.find(r => r.id === sid && r.date === today) ||
+      { id: sid, date: today, more_crowded:0, less_crowded:0, no_show:0, two_buses:0, total_reports:0 };
+    const updatedHist = { ...todayHist };
+
     if (alreadyMine) {
       updated[fbId] = Math.max(0, (updated[fbId] || 1) - 1);
-      updatedHistory[fbId] = Math.max(0, (updatedHistory[fbId] || 1) - 1);
-      updatedHistory.total_reports = Math.max(0, updatedHistory.total_reports - 1);
+      updatedHist[fbId] = Math.max(0, (updatedHist[fbId] || 1) - 1);
+      updatedHist.total_reports = Math.max(0, updatedHist.total_reports - 1);
       const newMy = { ...myFeedbacks }; delete newMy[myFbKey];
       setMyFeedbacks(newMy);
       try { localStorage.setItem("myfeedbacks59", JSON.stringify(newMy)); } catch {}
@@ -313,44 +351,51 @@ export default function App() {
       const oldFb = myFeedbacks[myFbKey];
       if (oldFb) {
         updated[oldFb] = Math.max(0, (updated[oldFb] || 1) - 1);
-        updatedHistory[oldFb] = Math.max(0, (updatedHistory[oldFb] || 1) - 1);
-        updatedHistory.total_reports = Math.max(0, updatedHistory.total_reports - 1);
+        updatedHist[oldFb] = Math.max(0, (updatedHist[oldFb] || 1) - 1);
+        updatedHist.total_reports = Math.max(0, updatedHist.total_reports - 1);
       }
       updated[fbId] = (updated[fbId] || 0) + 1;
-      updatedHistory[fbId] = (updatedHistory[fbId] || 0) + 1;
-      updatedHistory.total_reports = updatedHistory.total_reports + 1;
+      updatedHist[fbId] = (updatedHist[fbId] || 0) + 1;
+      updatedHist.total_reports = updatedHist.total_reports + 1;
       const newMy = { ...myFeedbacks, [myFbKey]: fbId };
       setMyFeedbacks(newMy);
       try { localStorage.setItem("myfeedbacks59", JSON.stringify(newMy)); } catch {}
       showToast("Feedback saved — helps future predictions 📊");
     }
+
     setFeedbacks(prev => ({ ...prev, [key]: updated }));
-    setHistory(prev => ({ ...prev, [hkey]: updatedHistory }));
+    setHistoryRows(prev => {
+      const filtered = prev.filter(r => !(r.id === sid && r.date === today));
+      return [...filtered, updatedHist];
+    });
     setFeedbackOpen(null);
+
     await Promise.all([
       sbUpsert("bus_feedbacks", key, { data: updated }),
-      sbUpsert("bus_history", hkey, {
-        more_crowded: updatedHistory.more_crowded,
-        less_crowded: updatedHistory.less_crowded,
-        no_show: updatedHistory.no_show,
-        two_buses: updatedHistory.two_buses,
-        total_reports: updatedHistory.total_reports,
+      sbUpsert("bus_history", sid, {
+        more_crowded: updatedHist.more_crowded,
+        less_crowded: updatedHist.less_crowded,
+        no_show: updatedHist.no_show,
+        two_buses: updatedHist.two_buses,
+        total_reports: updatedHist.total_reports,
       }),
     ]);
   };
 
   const submitArrivalDelay = async (time, delayMins) => {
-    const key = aKey(time);
-    const current = arrivals[key] || { total_delay_minutes:0,delay_report_count:0,total_trip_minutes:0,trip_report_count:0 };
+    const sid = slotId(time);
+    const today = todayDate();
+    const existing = arrivalRows.find(r => r.id === sid && r.date === today) ||
+      { id: sid, date: today, total_delay_minutes:0, delay_report_count:0, total_trip_minutes:0, trip_report_count:0 };
     const updated = {
-      ...current,
-      total_delay_minutes: current.total_delay_minutes + delayMins,
-      delay_report_count: current.delay_report_count + 1,
+      ...existing,
+      total_delay_minutes: existing.total_delay_minutes + delayMins,
+      delay_report_count: existing.delay_report_count + 1,
     };
-    setArrivals(prev => ({ ...prev, [key]: updated }));
+    setArrivalRows(prev => [...prev.filter(r => !(r.id === sid && r.date === today)), updated]);
     setEtaOpen(null);
     showToast(delayMins === 0 ? "✓ On time reported!" : `✓ +${delayMins} min delay reported`);
-    await sbUpsert("bus_arrivals", key, {
+    await sbUpsert("bus_arrivals", sid, {
       total_delay_minutes: updated.total_delay_minutes,
       delay_report_count: updated.delay_report_count,
       total_trip_minutes: updated.total_trip_minutes,
@@ -359,19 +404,21 @@ export default function App() {
   };
 
   const submitTripDuration = async (time, extraMins) => {
-    const key = aKey(time);
+    const sid = slotId(time);
+    const today = todayDate();
     const baseline = BASELINE_TRIP[direction]?.[time] || 10;
     const totalMins = baseline + extraMins;
-    const current = arrivals[key] || { total_delay_minutes:0,delay_report_count:0,total_trip_minutes:0,trip_report_count:0 };
+    const existing = arrivalRows.find(r => r.id === sid && r.date === today) ||
+      { id: sid, date: today, total_delay_minutes:0, delay_report_count:0, total_trip_minutes:0, trip_report_count:0 };
     const updated = {
-      ...current,
-      total_trip_minutes: current.total_trip_minutes + totalMins,
-      trip_report_count: current.trip_report_count + 1,
+      ...existing,
+      total_trip_minutes: existing.total_trip_minutes + totalMins,
+      trip_report_count: existing.trip_report_count + 1,
     };
-    setArrivals(prev => ({ ...prev, [key]: updated }));
+    setArrivalRows(prev => [...prev.filter(r => !(r.id === sid && r.date === today)), updated]);
     setEtaOpen(null);
-    showToast(extraMins === 0 ? "✓ Trip on schedule reported!" : `✓ +${extraMins} min longer trip reported`);
-    await sbUpsert("bus_arrivals", key, {
+    showToast(extraMins === 0 ? "✓ Trip on schedule!" : `✓ +${extraMins} min longer trip reported`);
+    await sbUpsert("bus_arrivals", sid, {
       total_delay_minutes: updated.total_delay_minutes,
       delay_report_count: updated.delay_report_count,
       total_trip_minutes: updated.total_trip_minutes,
@@ -432,7 +479,6 @@ export default function App() {
         .section-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:#444;margin:22px 0 10px}
       `}</style>
 
-      {/* Header */}
       <div style={{ background:"#0f0f0f",borderBottom:"1px solid #222",padding:"18px 20px 14px",width:"100%" }}>
         <div style={{ maxWidth:500,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
           <div style={{ display:"flex",alignItems:"baseline",gap:12 }}>
@@ -462,8 +508,7 @@ export default function App() {
           {upcoming.map(({ time, double }, i) => {
             const key = cKey(time);
             const fkey = fKey(time);
-            const hkey = hKey(time);
-            const akey = aKey(time);
+            const sid = slotId(time);
             const count = counts[key]?.count || 0;
             const cap = double ? CAPACITY * 2 : CAPACITY;
             const occ = occupancyInfo(count, double);
@@ -472,16 +517,13 @@ export default function App() {
             const minsLeft = timeToMins(time) - now;
             const pct = Math.min(100, (count / cap) * 100);
             const fbData = feedbacks[fkey] || {};
-            const histData = history[hkey] || null;
-            const arrivalData = arrivals[akey] || null;
-            const prediction = getPrediction(histData, double);
-            const reliability = getReliability(histData);
-            const eta = getETA(arrivalData, direction, time);
+            const prediction = getPrediction(historyRows, sid, double);
+            const reliability = getReliability(historyRows, sid);
+            const eta = getETA(arrivalRows, sid, direction, time);
             const myFbKey = `${direction}:${time}`;
             const myFb = myFeedbacks[myFbKey];
             const totalFb = Object.values(fbData).reduce((a, b) => a + (Number(b)||0), 0);
             const fbOpen = feedbackOpen === key;
-            // Show ETA report buttons with separate conditions
             const showArrivalButton = Math.abs(minsLeft) <= 20;
             const showTripButton = minsLeft <= -7 && minsLeft >= -60;
             const etaPanelOpen = etaOpen?.key === key;
@@ -490,7 +532,6 @@ export default function App() {
               <div key={key} className={`card upcoming ${mine?"mine":""}`} style={{ marginBottom:10 }}
                 onClick={() => !fbOpen && !etaPanelOpen && toggleBus(time)}>
 
-                {/* Top row */}
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
                   <div>
                     <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:6 }}>
@@ -509,7 +550,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Live bar */}
                 <div className="bar-bg"><div className="bar-fill" style={{ width:`${pct}%`,background:"#f97316" }} /></div>
 
                 {/* ETA box */}
@@ -522,14 +562,14 @@ export default function App() {
                       <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
                         <div>
                           <div style={{ fontSize:10,color:"#555",marginBottom:2 }}>Arrives at stop</div>
-                          <div style={{ fontSize:16,fontFamily:"'Syne',sans-serif",fontWeight:700,color: eta.avgDelay > 0 ? "#facc15" : "#4ade80" }}>
+                          <div style={{ fontSize:16,fontFamily:"'Syne',sans-serif",fontWeight:700,color:eta.avgDelay>0?"#facc15":"#4ade80" }}>
                             {eta.estArrivalAtStop}
                             {eta.avgDelay > 0 && <span style={{ fontSize:11,color:"#facc15",marginLeft:4 }}>+{eta.avgDelay}min</span>}
                           </div>
                         </div>
                         <div>
                           <div style={{ fontSize:10,color:"#555",marginBottom:2 }}>Arrives at end</div>
-                          <div style={{ fontSize:16,fontFamily:"'Syne',sans-serif",fontWeight:700,color: eta.avgTrip > eta.baseline ? "#facc15" : "#4ade80" }}>
+                          <div style={{ fontSize:16,fontFamily:"'Syne',sans-serif",fontWeight:700,color:eta.avgTrip>eta.baseline?"#facc15":"#4ade80" }}>
                             {eta.estArrivalAtEnd}
                             <span style={{ fontSize:11,color:"#555",marginLeft:4 }}>{eta.avgTrip}min ride</span>
                           </div>
@@ -553,13 +593,9 @@ export default function App() {
                       </div>
                     )}
                   </div>
-
-                  {/* Delay report panel */}
                   {etaPanelOpen && etaOpen?.type === "delay" && (
                     <div style={{ marginTop:12,paddingTop:12,borderTop:"1px solid #1e3a4a" }}>
-                      <div style={{ fontSize:11,color:"#38bdf8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:8 }}>
-                        How late was the bus?
-                      </div>
+                      <div style={{ fontSize:11,color:"#38bdf8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:8 }}>How late was the bus?</div>
                       <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
                         {DELAY_OPTIONS.map(d => (
                           <button key={d} className="delay-btn" onClick={() => submitArrivalDelay(time, d)}>
@@ -569,16 +605,10 @@ export default function App() {
                       </div>
                     </div>
                   )}
-
-                  {/* Trip duration panel */}
                   {etaPanelOpen && etaOpen?.type === "trip" && (
                     <div style={{ marginTop:12,paddingTop:12,borderTop:"1px solid #1e3a4a" }}>
-                      <div style={{ fontSize:11,color:"#38bdf8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:4 }}>
-                        How long was the ride?
-                      </div>
-                      <div style={{ fontSize:10,color:"#555",marginBottom:8 }}>
-                        Scheduled: {eta.baseline} min. Extra time?
-                      </div>
+                      <div style={{ fontSize:11,color:"#38bdf8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:4 }}>How long was the ride?</div>
+                      <div style={{ fontSize:10,color:"#555",marginBottom:8 }}>Scheduled: {eta.baseline} min. Extra time?</div>
                       <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
                         {DELAY_OPTIONS.map(d => (
                           <button key={d} className="delay-btn" onClick={() => submitTripDuration(time, d)}>
@@ -599,7 +629,7 @@ export default function App() {
                         <div style={{ display:"flex",alignItems:"center",gap:6 }}>
                           <span style={{ fontSize:14 }}>{prediction.dot}</span>
                           <span style={{ fontSize:12,color:prediction.color }}>{prediction.label}</span>
-                          <span style={{ fontSize:10,color:"#444" }}>({histData?.total_reports} reports)</span>
+                          <span style={{ fontSize:10,color:"#444" }}>({prediction.totalReports} reports)</span>
                         </div>
                         <div style={{ background:"#1a1a1a",borderRadius:4,height:3,marginTop:2,overflow:"hidden" }}>
                           <div style={{ width:`${prediction.pct*100}%`,height:"100%",background:prediction.color,borderRadius:4,transition:"width .5s" }} />
@@ -630,12 +660,9 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Feedback panel */}
                 {fbOpen && (
                   <div className="fb-panel" onClick={e => e.stopPropagation()}>
-                    <div style={{ fontSize:11,color:"#555",letterSpacing:".08em",textTransform:"uppercase",marginBottom:10 }}>
-                      How was the bus? · Helps future predictions
-                    </div>
+                    <div style={{ fontSize:11,color:"#555",letterSpacing:".08em",textTransform:"uppercase",marginBottom:10 }}>How was the bus? · Helps future predictions</div>
                     {FEEDBACK_OPTIONS.map(opt => {
                       const votes = fbData[opt.id] || 0;
                       const selected = myFb === opt.id;
@@ -659,9 +686,8 @@ export default function App() {
           <div className="section-label">Past buses</div>
           {past.slice(-4).map(({ time, double }) => {
             const key = cKey(time);
-            const hkey = hKey(time);
-            const histData = history[hkey] || null;
-            const reliability = getReliability(histData);
+            const sid = slotId(time);
+            const reliability = getReliability(historyRows, sid);
             return (
               <div key={key} className="card past" style={{ marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                 <div style={{ display:"flex",alignItems:"center",gap:10 }}>
@@ -682,7 +708,7 @@ export default function App() {
         </>}
 
         <div style={{ marginTop:32,fontSize:10,color:"#222",textAlign:"center",lineHeight:2,letterSpacing:".05em",textTransform:"uppercase" }}>
-          Live shared data · ETA improves with reports
+          Live shared data · Predictions improve with reports
         </div>
       </div>
 
