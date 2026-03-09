@@ -234,6 +234,8 @@ export default function App() {
   const [myFeedbacks, setMyFeedbacks] = useState({});
   const [toast, setToast] = useState(null);
   const [tick, setTick] = useState(0);
+  const [selectedTo, setSelectedTo] = useState(null);
+  const [selectedFrom, setSelectedFrom] = useState(null);
 
   useEffect(() => {
     try { if (localStorage.getItem("bus59_auth") === APP_PASSWORD) setUnlocked(true); } catch {}
@@ -428,6 +430,19 @@ export default function App() {
 
   if (!unlocked) return <LockScreen onUnlock={handleUnlock} />;
 
+  // Focus mode logic
+  const selected = direction === "to" ? selectedTo : selectedFrom;
+  const setSelected = direction === "to" ? setSelectedTo : setSelectedFrom;
+  const bothSelected = selectedTo && selectedFrom;
+  
+  const handleSelectBus = (time) => {
+    if (selected === time) {
+      setSelected(null);
+    } else {
+      setSelected(time);
+    }
+  };
+
   const schedule = getSchedule().sort((a, b) => timeToMins(a.time) - timeToMins(b.time));
   const now = minsNow() + tick * 0;
   const upcoming = schedule.filter(b => timeToMins(b.time) >= now - 5);
@@ -503,6 +518,38 @@ export default function App() {
 
         {!isWeekday() && !isSaturday() && <div style={{ color:"#ef4444",fontSize:14 }}>No service on Sundays.</div>}
 
+        {/* Summary view when both directions selected */}
+        {bothSelected && (
+          <div style={{ background:"#0d1a22",border:"1px solid #1e3a4a",borderRadius:12,padding:14,marginBottom:18 }}>
+            <div style={{ fontSize:10,color:"#444",letterSpacing:".08em",textTransform:"uppercase",marginBottom:10 }}>Your trip</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+              {[selectedTo, selectedFrom].map((time, idx) => {
+                const dir = idx === 0 ? "to" : "from";
+                const dir2 = dir === "to" ? "from" : "to";
+                const sch = dir === "to" ? WEEKDAY_TO_VILLA : WEEKDAY_FROM_VILLA;  // simplified for now
+                const bus = sch.find(b => b.time === time);
+                const key = `${dir}:${time}`;
+                const sid = `${dir}:${time}`;
+                const count = counts[key]?.count || 0;
+                const cap = bus?.double ? CAPACITY * 2 : CAPACITY;
+                const occ = occupancyInfo(count, bus?.double);
+                const eta = getETA(arrivalRows, sid, dir, time);
+                return (
+                  <div key={dir} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12 }}>
+                    <span style={{ color:"#aaa" }}>{dir === "to" ? "→" : "←"} {dir === "to" ? "P. Cavour" : "Villa"}</span>
+                    <span style={{ fontWeight:"bold",minWidth:40 }}>{time}</span>
+                    <span style={{ color:"#666" }}>~{eta.estArrivalAtStop}</span>
+                    <span style={{ fontSize:14 }}>{occ.dot}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={() => { setSelectedTo(null); setSelectedFrom(null); }} style={{ width:"100%",marginTop:10,background:"transparent",border:"1px solid #444",borderRadius:8,padding:8,color:"#888",fontSize:11,cursor:"pointer",fontFamily:"'DM Mono',monospace" }}>
+              Change →
+            </button>
+          </div>
+        )}
+
         {upcoming.length > 0 && <>
           <div className="section-label">Upcoming buses</div>
           {upcoming.map(({ time, double }, i) => {
@@ -527,10 +574,49 @@ export default function App() {
             const showArrivalButton = Math.abs(minsLeft) <= 20;
             const showTripButton = minsLeft <= -7 && minsLeft >= -60;
             const etaPanelOpen = etaOpen?.key === key;
+            const isSelected = selected === time;
 
+            // Compact card (browse mode or collapsed when another selected)
+            if (!selected && !isSelected) {
+              return (
+                <div key={key} className={`card upcoming ${mine?"mine":""}`} style={{ marginBottom:8,cursor:"pointer",padding:"12px 14px" }}
+                  onClick={() => handleSelectBus(time)}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:12,flex:1 }}>
+                      <span style={{ fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:20,color:"#f97316" }}>{time}</span>
+                      <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                        <span style={{ fontSize:18 }}>{occ.dot}</span>
+                        <span style={{ fontSize:11,color:"#888" }}>{occ.label}</span>
+                        {prediction && <span style={{ fontSize:11,color:prediction.color }}>{prediction.label}</span>}
+                      </div>
+                    </div>
+                    {isNext && <span className="pill next pulse">next</span>}
+                  </div>
+                </div>
+              );
+            }
+
+            // One-line card (other card when this one selected)
+            if (selected && !isSelected) {
+              return (
+                <div key={key} className="card upcoming" style={{ marginBottom:6,opacity:0.5,padding:"10px 14px",cursor:"pointer" }}
+                  onClick={() => handleSelectBus(time)}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11 }}>
+                    <span style={{ color:"#f97316",fontWeight:"bold" }}>{time}</span>
+                    <span style={{ color:"#666" }}>{occ.dot} {occ.label}</span>
+                  </div>
+                </div>
+              );
+            }
+
+            // Full card (selected mode)
             return (
-              <div key={key} className={`card upcoming ${mine?"mine":""}`} style={{ marginBottom:10 }}
-                onClick={() => !fbOpen && !etaPanelOpen && toggleBus(time)}>
+              <div key={key} className={`card upcoming ${mine?"mine":""}`} style={{ marginBottom:10 }}>
+                {selected && (
+                  <button onClick={() => handleSelectBus(time)} style={{ display:"block",margin:"0 0 12px",background:"transparent",border:"none",color:"#666",fontSize:11,cursor:"pointer",fontFamily:"'DM Mono',monospace" }}>
+                    ← Back to buses
+                  </button>
+                )}
 
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
                   <div>
@@ -552,7 +638,6 @@ export default function App() {
 
                 <div className="bar-bg"><div className="bar-fill" style={{ width:`${pct}%`,background:"#f97316" }} /></div>
 
-                {/* ETA box */}
                 <div className="eta-box" onClick={e => e.stopPropagation()}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
                     <div style={{ flex:1 }}>
@@ -620,7 +705,6 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Prediction + reliability */}
                 {(prediction || reliability) && (
                   <div className="pred-box" onClick={e => e.stopPropagation()}>
                     {prediction && (
@@ -647,7 +731,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Actions */}
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12 }}
                   onClick={e => e.stopPropagation()}>
                   <div style={{ display:"flex",gap:8,alignItems:"center" }}>
