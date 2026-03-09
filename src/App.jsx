@@ -63,10 +63,9 @@ const WEEKDAY_FROM_VILLA = [
   { time: "09:50", double: false }, { time: "13:10", double: false },
   { time: "13:55", double: false }, { time: "14:25", double: false },
   { time: "14:55", double: false }, { time: "17:10", double: false },
-  { time: "17:30", double: true },  { time: "17:40", double: false },
-  { time: "18:10", double: false }, { time: "18:20", double: true },
-  { time: "18:30", double: false }, { time: "19:10", double: false },
-  { time: "20:10", double: false },
+  { time: "17:40", double: true },  { time: "18:10", double: false },
+  { time: "18:20", double: false }, { time: "18:30", double: true },
+  { time: "19:10", double: false }, { time: "20:10", double: false },
 ];
 const SAT_TO_VILLA = [
   { time: "07:15", double: false }, { time: "07:45", double: false },
