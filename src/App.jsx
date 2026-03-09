@@ -7,14 +7,6 @@ const APP_PASSWORD = "unibo2025";
 const SUPABASE_URL = "https://kegaybjxbcvxtkflmdxe.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QpN9v-S3sO-qQB616TtKNg_TohRlPGl";
 
-async function sbGet(table, id) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, {
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-  });
-  const data = await r.json();
-  return data[0] || null;
-}
-
 async function sbUpsert(table, id, payload) {
   await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
     method: "POST",
@@ -34,6 +26,12 @@ async function sbGetAll(table) {
   });
   return await r.json();
 }
+
+// Baseline trip durations in minutes from schedule
+const BASELINE_TRIP = {
+  "to": { "07:15":10,"08:10":10,"08:40":10,"09:10":10,"09:40":10,"12:45":10,"13:45":10,"14:15":10,"14:45":10,"16:45":15,"17:20":20,"17:45":20,"18:10":20,"18:45":15,"20:00":10 },
+  "from": { "07:25":10,"08:20":10,"08:50":10,"09:20":10,"09:50":10,"13:10":10,"13:55":10,"14:25":10,"14:55":10,"17:10":20,"17:30":20,"17:40":20,"18:10":20,"18:20":20,"18:30":15,"19:10":10,"20:10":10 }
+};
 
 const WEEKDAY_TO_VILLA = [
   { time: "07:15", double: false }, { time: "08:10", double: false },
@@ -75,10 +73,11 @@ const SAT_FROM_VILLA = [
 
 function getNow() { const n = new Date(); return { h: n.getHours(), m: n.getMinutes(), day: n.getDay() }; }
 function timeToMins(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
+function minsToTime(m) { const h = Math.floor(m / 60); const min = m % 60; return `${String(h).padStart(2,"0")}:${String(min).padStart(2,"0")}`; }
 function minsNow() { const { h, m } = getNow(); return h * 60 + m; }
 function isWeekday() { const d = getNow().day; return d >= 1 && d <= 5; }
 function isSaturday() { return getNow().day === 6; }
-function dayPrefix() { const d = getNow().day; return d === 6 ? "sat" : "wd"; }
+function dayPrefix() { return getNow().day === 6 ? "sat" : "wd"; }
 
 const CAPACITY = 40;
 
@@ -90,32 +89,49 @@ function occupancyInfo(count, double) {
   return { label: "Full", color: "#fff", dot: "🔴" };
 }
 
-// Prediction: uses feedback history to estimate occupancy
-// Returns null if not enough data (<3 reports)
 function getPrediction(history, double) {
   if (!history || history.total_reports < 3) return null;
   const cap = double ? CAPACITY * 2 : CAPACITY;
   const { more_crowded, less_crowded, total_reports } = history;
-  // Score from -1 (always empty) to +1 (always full)
   const score = (more_crowded - less_crowded) / total_reports;
-  // Map score to predicted occupancy %
-  const basePct = 0.35; // assume moderate baseline
-  const predictedPct = Math.max(0.05, Math.min(0.98, basePct + score * 0.55));
-  const predictedCount = Math.round(predictedPct * cap);
+  const predictedPct = Math.max(0.05, Math.min(0.98, 0.35 + score * 0.55));
   if (predictedPct < 0.4) return { label: "Likely comfortable", dot: "🟢", color: "#4ade80", pct: predictedPct };
   if (predictedPct < 0.75) return { label: "Likely busy", dot: "🟡", color: "#facc15", pct: predictedPct };
   return { label: "Likely full", dot: "🔴", color: "#f87171", pct: predictedPct };
 }
 
-// Reliability: based on no_show and two_buses reports
 function getReliability(history) {
   if (!history || history.total_reports < 3) return null;
   const { no_show, two_buses, total_reports } = history;
-  const badEvents = no_show + two_buses;
-  const score = Math.round(((total_reports - badEvents) / total_reports) * 10);
+  const score = Math.round(((total_reports - no_show - two_buses) / total_reports) * 10);
   if (score >= 8) return { score, label: `${score}/10 reliable`, color: "#4ade80", icon: "✓" };
   if (score >= 5) return { score, label: `${score}/10 reliable`, color: "#facc15", icon: "⚠" };
   return { score, label: `${score}/10 reliable`, color: "#f87171", icon: "✗" };
+}
+
+function getETA(arrivalData, direction, time) {
+  const baseline = BASELINE_TRIP[direction]?.[time] || 10;
+  let avgDelay = 0, avgTrip = baseline;
+  if (arrivalData) {
+    if (arrivalData.delay_report_count >= 2)
+      avgDelay = Math.round(arrivalData.total_delay_minutes / arrivalData.delay_report_count);
+    if (arrivalData.trip_report_count >= 2)
+      avgTrip = Math.round(arrivalData.total_trip_minutes / arrivalData.trip_report_count);
+  }
+  const scheduledMins = timeToMins(time);
+  const estArrivalAtStop = scheduledMins + avgDelay;
+  const estArrivalAtEnd = estArrivalAtStop + avgTrip;
+  const hasRealData = arrivalData && (arrivalData.delay_report_count >= 2 || arrivalData.trip_report_count >= 2);
+  return {
+    avgDelay,
+    avgTrip,
+    estArrivalAtStop: minsToTime(estArrivalAtStop),
+    estArrivalAtEnd: minsToTime(estArrivalAtEnd),
+    hasRealData,
+    delayReports: arrivalData?.delay_report_count || 0,
+    tripReports: arrivalData?.trip_report_count || 0,
+    baseline,
+  };
 }
 
 const FEEDBACK_OPTIONS = [
@@ -125,11 +141,12 @@ const FEEDBACK_OPTIONS = [
   { id: "no_show", label: "Bus didn't show up 👻", icon: "👻" },
 ];
 
+const DELAY_OPTIONS = [0, 5, 10, 15, 20];
+
 function LockScreen({ onUnlock }) {
   const [input, setInput] = useState("");
   const [shake, setShake] = useState(false);
   const [error, setError] = useState(false);
-
   const attempt = () => {
     if (input === APP_PASSWORD) { onUnlock(); }
     else {
@@ -138,9 +155,8 @@ function LockScreen({ onUnlock }) {
       setTimeout(() => setError(false), 2000);
     }
   };
-
   return (
-    <div style={{ minHeight: "100vh", width: "100%", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Mono','Courier New',monospace", padding: 24 }}>
+    <div style={{ minHeight:"100vh",width:"100%",background:"#0a0a0a",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Mono','Courier New',monospace",padding:24 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
@@ -150,20 +166,20 @@ function LockScreen({ onUnlock }) {
         @keyframes fadein{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
         .lock-box{animation:fadein .5s ease}
       `}</style>
-      <div className="lock-box" style={{ width: "100%", maxWidth: 340, textAlign: "center" }}>
-        <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 72, color: "#f97316", letterSpacing: "-0.03em", marginBottom: 4 }}>59</div>
-        <div style={{ fontSize: 11, color: "#444", letterSpacing: ".15em", textTransform: "uppercase", marginBottom: 48 }}>TPER Bologna · Restricted Access</div>
-        <div style={{ fontSize: 32, marginBottom: 24 }}>🔑</div>
+      <div className="lock-box" style={{ width:"100%",maxWidth:340,textAlign:"center" }}>
+        <div style={{ fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:72,color:"#f97316",letterSpacing:"-0.03em",marginBottom:4 }}>59</div>
+        <div style={{ fontSize:11,color:"#444",letterSpacing:".15em",textTransform:"uppercase",marginBottom:48 }}>TPER Bologna · Restricted Access</div>
+        <div style={{ fontSize:32,marginBottom:24 }}>🔑</div>
         <div className={shake ? "shake" : ""}>
           <input type="password" value={input} onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && attempt()} placeholder="password" autoFocus
-            style={{ width: "100%", background: "#111", border: `1.5px solid ${error ? "#ef4444" : "#333"}`, borderRadius: 10, padding: "14px 18px", color: "#fff", fontSize: 16, fontFamily: "'DM Mono',monospace", letterSpacing: ".15em", outline: "none", textAlign: "center", transition: "border-color .2s", marginBottom: 12 }} />
-          {error && <div style={{ fontSize: 12, color: "#ef4444", marginBottom: 12 }}>Wrong password. Try again.</div>}
-          <button onClick={attempt} style={{ width: "100%", background: "#f97316", border: "none", borderRadius: 10, padding: "14px", color: "#000", fontSize: 13, fontFamily: "'DM Mono',monospace", letterSpacing: ".1em", textTransform: "uppercase", cursor: "pointer", fontWeight: "bold" }}>
+            onKeyDown={e => e.key==="Enter" && attempt()} placeholder="password" autoFocus
+            style={{ width:"100%",background:"#111",border:`1.5px solid ${error?"#ef4444":"#333"}`,borderRadius:10,padding:"14px 18px",color:"#fff",fontSize:16,fontFamily:"'DM Mono',monospace",letterSpacing:".15em",outline:"none",textAlign:"center",transition:"border-color .2s",marginBottom:12 }} />
+          {error && <div style={{ fontSize:12,color:"#ef4444",marginBottom:12 }}>Wrong password. Try again.</div>}
+          <button onClick={attempt} style={{ width:"100%",background:"#f97316",border:"none",borderRadius:10,padding:"14px",color:"#000",fontSize:13,fontFamily:"'DM Mono',monospace",letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",fontWeight:"bold" }}>
             Enter →
           </button>
         </div>
-        <div style={{ marginTop: 40, fontSize: 10, color: "#333", letterSpacing: ".08em", textTransform: "uppercase" }}>Ask your group for the password</div>
+        <div style={{ marginTop:40,fontSize:10,color:"#333",letterSpacing:".08em",textTransform:"uppercase" }}>Ask your group for the password</div>
       </div>
     </div>
   );
@@ -175,8 +191,10 @@ export default function App() {
   const [counts, setCounts] = useState({});
   const [feedbacks, setFeedbacks] = useState({});
   const [history, setHistory] = useState({});
+  const [arrivals, setArrivals] = useState({});
   const [myBus, setMyBus] = useState(null);
   const [feedbackOpen, setFeedbackOpen] = useState(null);
+  const [etaOpen, setEtaOpen] = useState(null); // "delay" | "trip" | null, keyed by buskey
   const [myFeedbacks, setMyFeedbacks] = useState({});
   const [toast, setToast] = useState(null);
   const [tick, setTick] = useState(0);
@@ -195,20 +213,31 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Sync across tabs
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === "mybus59") setMyBus(e.newValue || null);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
   const loadAll = useCallback(async () => {
     try {
-      const [countRows, fbRows, histRows] = await Promise.all([
+      const [countRows, fbRows, histRows, arrivalRows] = await Promise.all([
         sbGetAll("bus_counts"),
         sbGetAll("bus_feedbacks"),
         sbGetAll("bus_history"),
+        sbGetAll("bus_arrivals"),
       ]);
-      const c = {}, f = {}, h = {};
+      const c = {}, f = {}, h = {}, a = {};
       countRows.forEach(r => c[r.id] = { count: r.count });
       fbRows.forEach(r => f[r.id] = r.data);
       histRows.forEach(r => h[r.id] = r);
-      setCounts(c); setFeedbacks(f); setHistory(h);
+      arrivalRows.forEach(r => a[r.id] = r);
+      setCounts(c); setFeedbacks(f); setHistory(h); setArrivals(a);
     } catch (e) { console.error(e); }
   }, []);
 
@@ -227,14 +256,6 @@ export default function App() {
     } catch {}
   }, [unlocked]);
 
-  useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === "mybus59") setMyBus(e.newValue || null);
-    };
-    window.addEventListener("storage", e => onStorage(e));
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
   const getSchedule = () => {
     const wd = isWeekday(), sat = isSaturday();
     if (!wd && !sat) return [];
@@ -244,8 +265,8 @@ export default function App() {
 
   const cKey = (time) => `${direction}:${time}`;
   const fKey = (time) => `fb:${direction}:${time}`;
-  // History key includes day-of-week so predictions are per weekday slot
   const hKey = (time) => `${dayPrefix()}:${direction}:${time}`;
+  const aKey = (time) => `${dayPrefix()}:${direction}:${time}`;
 
   const toggleBus = async (time) => {
     const key = cKey(time);
@@ -279,11 +300,9 @@ export default function App() {
     const alreadyMine = myFeedbacks[myFbKey] === fbId;
     const existing = feedbacks[key] || {};
     const updated = { ...existing };
-    const currentHistory = history[hkey] || { more_crowded: 0, less_crowded: 0, no_show: 0, two_buses: 0, total_reports: 0 };
+    const currentHistory = history[hkey] || { more_crowded:0,less_crowded:0,no_show:0,two_buses:0,total_reports:0 };
     const updatedHistory = { ...currentHistory };
-
     if (alreadyMine) {
-      // Undo feedback
       updated[fbId] = Math.max(0, (updated[fbId] || 1) - 1);
       updatedHistory[fbId] = Math.max(0, (updatedHistory[fbId] || 1) - 1);
       updatedHistory.total_reports = Math.max(0, updatedHistory.total_reports - 1);
@@ -291,7 +310,6 @@ export default function App() {
       setMyFeedbacks(newMy);
       try { localStorage.setItem("myfeedbacks59", JSON.stringify(newMy)); } catch {}
     } else {
-      // Remove old feedback from history if switching
       const oldFb = myFeedbacks[myFbKey];
       if (oldFb) {
         updated[oldFb] = Math.max(0, (updated[oldFb] || 1) - 1);
@@ -306,11 +324,9 @@ export default function App() {
       try { localStorage.setItem("myfeedbacks59", JSON.stringify(newMy)); } catch {}
       showToast("Feedback saved — helps future predictions 📊");
     }
-
     setFeedbacks(prev => ({ ...prev, [key]: updated }));
     setHistory(prev => ({ ...prev, [hkey]: updatedHistory }));
     setFeedbackOpen(null);
-
     await Promise.all([
       sbUpsert("bus_feedbacks", key, { data: updated }),
       sbUpsert("bus_history", hkey, {
@@ -323,6 +339,46 @@ export default function App() {
     ]);
   };
 
+  const submitArrivalDelay = async (time, delayMins) => {
+    const key = aKey(time);
+    const current = arrivals[key] || { total_delay_minutes:0,delay_report_count:0,total_trip_minutes:0,trip_report_count:0 };
+    const updated = {
+      ...current,
+      total_delay_minutes: current.total_delay_minutes + delayMins,
+      delay_report_count: current.delay_report_count + 1,
+    };
+    setArrivals(prev => ({ ...prev, [key]: updated }));
+    setEtaOpen(null);
+    showToast(delayMins === 0 ? "✓ On time reported!" : `✓ +${delayMins} min delay reported`);
+    await sbUpsert("bus_arrivals", key, {
+      total_delay_minutes: updated.total_delay_minutes,
+      delay_report_count: updated.delay_report_count,
+      total_trip_minutes: updated.total_trip_minutes,
+      trip_report_count: updated.trip_report_count,
+    });
+  };
+
+  const submitTripDuration = async (time, extraMins) => {
+    const key = aKey(time);
+    const baseline = BASELINE_TRIP[direction]?.[time] || 10;
+    const totalMins = baseline + extraMins;
+    const current = arrivals[key] || { total_delay_minutes:0,delay_report_count:0,total_trip_minutes:0,trip_report_count:0 };
+    const updated = {
+      ...current,
+      total_trip_minutes: current.total_trip_minutes + totalMins,
+      trip_report_count: current.trip_report_count + 1,
+    };
+    setArrivals(prev => ({ ...prev, [key]: updated }));
+    setEtaOpen(null);
+    showToast(extraMins === 0 ? "✓ Trip on schedule reported!" : `✓ +${extraMins} min longer trip reported`);
+    await sbUpsert("bus_arrivals", key, {
+      total_delay_minutes: updated.total_delay_minutes,
+      delay_report_count: updated.delay_report_count,
+      total_trip_minutes: updated.total_trip_minutes,
+      trip_report_count: updated.trip_report_count,
+    });
+  };
+
   if (!unlocked) return <LockScreen onUnlock={handleUnlock} />;
 
   const schedule = getSchedule().sort((a, b) => timeToMins(a.time) - timeToMins(b.time));
@@ -332,7 +388,7 @@ export default function App() {
   const dayLabel = isWeekday() ? "Mon–Fri" : isSaturday() ? "Saturday" : "Sunday";
 
   return (
-    <div style={{ minHeight: "100vh", width: "100%", background: "#0a0a0a", fontFamily: "'DM Mono','Courier New',monospace", color: "#e8e8e8" }}>
+    <div style={{ minHeight:"100vh",width:"100%",background:"#0a0a0a",fontFamily:"'DM Mono','Courier New',monospace",color:"#e8e8e8" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
@@ -357,12 +413,18 @@ export default function App() {
         .btn-leave:hover{background:#ef444422}
         .btn-fb{color:#666;background:transparent;border-color:#333;font-size:11px}
         .btn-fb:hover{border-color:#555;color:#999}
+        .btn-eta{color:#38bdf8;background:transparent;border-color:#38bdf844;font-size:11px}
+        .btn-eta:hover{background:#38bdf811}
         .fb-panel{background:#0d0d0d;border:1px solid #222;border-radius:12px;padding:14px;margin-top:10px}
         .fb-opt{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;transition:background .12s;border:1px solid transparent;font-size:13px;color:#ccc}
         .fb-opt:hover{background:#1a1a1a;border-color:#333}
         .fb-opt.selected{background:#f9731618;border-color:#f9731644;color:#f97316}
+        .eta-panel{background:#0d0d0d;border:1px solid #1a2a33;border-radius:12px;padding:14px;margin-top:10px}
+        .delay-btn{padding:7px 14px;border-radius:50px;border:1px solid #1e3a4a;background:transparent;color:#38bdf8;font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;transition:all .15s}
+        .delay-btn:hover{background:#38bdf822;border-color:#38bdf8}
         .pred-box{background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px;padding:8px 12px;margin-top:8px;display:flex;align-items:center;justify-content:space-between}
         .rel-box{display:inline-flex;align-items:center;gap:5px;font-size:10px;padding:2px 8px;border-radius:50px;letter-spacing:.05em}
+        .eta-box{background:#0d1a22;border:1px solid #1e3a4a;border-radius:8px;padding:10px 14px;margin-top:8px}
         .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;border:1px solid #f9731644;color:#f97316;padding:10px 20px;border-radius:50px;font-size:12px;letter-spacing:.05em;animation:fadeup .3s ease;z-index:100;white-space:nowrap}
         @keyframes fadeup{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
         .pulse{animation:pulse 2s infinite}
@@ -370,29 +432,30 @@ export default function App() {
         .section-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:#444;margin:22px 0 10px}
       `}</style>
 
-      <div style={{ background: "#0f0f0f", borderBottom: "1px solid #222", padding: "18px 20px 14px", width: "100%" }}>
-        <div style={{ maxWidth: 500, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-            <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 36, color: "#f97316", letterSpacing: "-0.03em" }}>59</span>
+      {/* Header */}
+      <div style={{ background:"#0f0f0f",borderBottom:"1px solid #222",padding:"18px 20px 14px",width:"100%" }}>
+        <div style={{ maxWidth:500,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+          <div style={{ display:"flex",alignItems:"baseline",gap:12 }}>
+            <span style={{ fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:36,color:"#f97316",letterSpacing:"-0.03em" }}>59</span>
             <div>
-              <div style={{ fontSize: 13, color: "#aaa" }}>TPER Bologna</div>
-              <div style={{ fontSize: 10, color: "#555", letterSpacing: ".1em", textTransform: "uppercase" }}>{dayLabel} · live</div>
+              <div style={{ fontSize:13,color:"#aaa" }}>TPER Bologna</div>
+              <div style={{ fontSize:10,color:"#555",letterSpacing:".1em",textTransform:"uppercase" }}>{dayLabel} · live</div>
             </div>
           </div>
           <button onClick={() => { try { localStorage.removeItem("bus59_auth"); } catch {} setUnlocked(false); }}
-            style={{ background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "6px 12px", color: "#555", fontSize: 11, cursor: "pointer", fontFamily: "'DM Mono',monospace" }}>
+            style={{ background:"transparent",border:"1px solid #222",borderRadius:8,padding:"6px 12px",color:"#555",fontSize:11,cursor:"pointer",fontFamily:"'DM Mono',monospace" }}>
             sign out
           </button>
         </div>
       </div>
 
-      <div style={{ maxWidth: 500, margin: "0 auto", padding: "18px 14px 60px", width: "100%" }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-          <button className={`dir-btn ${direction === "to" ? "active" : ""}`} onClick={() => setDirection("to")}>P. Cavour → Villa</button>
-          <button className={`dir-btn ${direction === "from" ? "active" : ""}`} onClick={() => setDirection("from")}>Villa → P. Cavour</button>
+      <div style={{ maxWidth:500,margin:"0 auto",padding:"18px 14px 60px",width:"100%" }}>
+        <div style={{ display:"flex",gap:8,marginBottom:20 }}>
+          <button className={`dir-btn ${direction==="to"?"active":""}`} onClick={() => setDirection("to")}>P. Cavour → Villa</button>
+          <button className={`dir-btn ${direction==="from"?"active":""}`} onClick={() => setDirection("from")}>Villa → P. Cavour</button>
         </div>
 
-        {!isWeekday() && !isSaturday() && <div style={{ color: "#ef4444", fontSize: 14 }}>No service on Sundays.</div>}
+        {!isWeekday() && !isSaturday() && <div style={{ color:"#ef4444",fontSize:14 }}>No service on Sundays.</div>}
 
         {upcoming.length > 0 && <>
           <div className="section-label">Upcoming buses</div>
@@ -400,6 +463,7 @@ export default function App() {
             const key = cKey(time);
             const fkey = fKey(time);
             const hkey = hKey(time);
+            const akey = aKey(time);
             const count = counts[key]?.count || 0;
             const cap = double ? CAPACITY * 2 : CAPACITY;
             const occ = occupancyInfo(count, double);
@@ -409,64 +473,138 @@ export default function App() {
             const pct = Math.min(100, (count / cap) * 100);
             const fbData = feedbacks[fkey] || {};
             const histData = history[hkey] || null;
+            const arrivalData = arrivals[akey] || null;
             const prediction = getPrediction(histData, double);
             const reliability = getReliability(histData);
+            const eta = getETA(arrivalData, direction, time);
             const myFbKey = `${direction}:${time}`;
             const myFb = myFeedbacks[myFbKey];
-            const totalFb = Object.values(fbData).reduce((a, b) => a + (Number(b) || 0), 0);
+            const totalFb = Object.values(fbData).reduce((a, b) => a + (Number(b)||0), 0);
             const fbOpen = feedbackOpen === key;
+            // Show ETA report buttons only within 20 min window of scheduled time
+            const showEtaButtons = Math.abs(minsLeft) <= 20;
+            const etaPanelOpen = etaOpen?.key === key;
 
             return (
-              <div key={key} className={`card upcoming ${mine ? "mine" : ""}`} style={{ marginBottom: 10 }}
-                onClick={() => !fbOpen && toggleBus(time)}>
+              <div key={key} className={`card upcoming ${mine?"mine":""}`} style={{ marginBottom:10 }}
+                onClick={() => !fbOpen && !etaPanelOpen && toggleBus(time)}>
 
                 {/* Top row */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                      <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 28, color: "#f97316", letterSpacing: "-0.02em" }}>{time}</span>
+                    <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:6 }}>
+                      <span style={{ fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:28,color:"#f97316",letterSpacing:"-0.02em" }}>{time}</span>
                       {isNext && <span className="pill next pulse">next</span>}
                       {double && <span className="pill double">🚌🚌 double</span>}
                     </div>
-                    <div style={{ fontSize: 11, color: "#888" }}>
+                    <div style={{ fontSize:11,color:"#888" }}>
                       {minsLeft <= 0 ? "⚡ departing" : `in ${minsLeft} min`} · {count}/{cap} people
                     </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 26, color: occ.color }}>{count}</div>
-                    <div style={{ fontSize: 18 }}>{occ.dot}</div>
-                    <div style={{ fontSize: 10, color: occ.color, letterSpacing: ".05em", textTransform: "uppercase" }}>{occ.label}</div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:occ.color }}>{count}</div>
+                    <div style={{ fontSize:18 }}>{occ.dot}</div>
+                    <div style={{ fontSize:10,color:occ.color,letterSpacing:".05em",textTransform:"uppercase" }}>{occ.label}</div>
                   </div>
                 </div>
 
                 {/* Live bar */}
-                <div className="bar-bg"><div className="bar-fill" style={{ width: `${pct}%`, background: "#f97316" }} /></div>
+                <div className="bar-bg"><div className="bar-fill" style={{ width:`${pct}%`,background:"#f97316" }} /></div>
 
-                {/* Prediction + reliability row */}
+                {/* ETA box */}
+                <div className="eta-box" onClick={e => e.stopPropagation()}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:10,color:"#38bdf8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:6 }}>
+                        ⏱ ETA {eta.hasRealData ? `· ${eta.delayReports + eta.tripReports} reports` : "· baseline only"}
+                      </div>
+                      <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
+                        <div>
+                          <div style={{ fontSize:10,color:"#555",marginBottom:2 }}>Arrives at stop</div>
+                          <div style={{ fontSize:16,fontFamily:"'Syne',sans-serif",fontWeight:700,color: eta.avgDelay > 0 ? "#facc15" : "#4ade80" }}>
+                            {eta.estArrivalAtStop}
+                            {eta.avgDelay > 0 && <span style={{ fontSize:11,color:"#facc15",marginLeft:4 }}>+{eta.avgDelay}min</span>}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize:10,color:"#555",marginBottom:2 }}>Arrives at end</div>
+                          <div style={{ fontSize:16,fontFamily:"'Syne',sans-serif",fontWeight:700,color: eta.avgTrip > eta.baseline ? "#facc15" : "#4ade80" }}>
+                            {eta.estArrivalAtEnd}
+                            <span style={{ fontSize:11,color:"#555",marginLeft:4 }}>{eta.avgTrip}min ride</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {showEtaButtons && (
+                      <div style={{ display:"flex",flexDirection:"column",gap:4,marginLeft:8 }}>
+                        <button className="btn btn-eta"
+                          onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="delay" ? null : { key, type:"delay" }); }}>
+                          🚌 Just arrived
+                        </button>
+                        <button className="btn btn-eta"
+                          onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="trip" ? null : { key, type:"trip" }); }}>
+                          🏁 Just got off
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Delay report panel */}
+                  {etaPanelOpen && etaOpen?.type === "delay" && (
+                    <div style={{ marginTop:12,paddingTop:12,borderTop:"1px solid #1e3a4a" }}>
+                      <div style={{ fontSize:11,color:"#38bdf8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:8 }}>
+                        How late was the bus?
+                      </div>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        {DELAY_OPTIONS.map(d => (
+                          <button key={d} className="delay-btn" onClick={() => submitArrivalDelay(time, d)}>
+                            {d === 0 ? "On time" : `+${d} min`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Trip duration panel */}
+                  {etaPanelOpen && etaOpen?.type === "trip" && (
+                    <div style={{ marginTop:12,paddingTop:12,borderTop:"1px solid #1e3a4a" }}>
+                      <div style={{ fontSize:11,color:"#38bdf8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:4 }}>
+                        How long was the ride?
+                      </div>
+                      <div style={{ fontSize:10,color:"#555",marginBottom:8 }}>
+                        Scheduled: {eta.baseline} min. Extra time?
+                      </div>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        {DELAY_OPTIONS.map(d => (
+                          <button key={d} className="delay-btn" onClick={() => submitTripDuration(time, d)}>
+                            {d === 0 ? "On time" : `+${d} min`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Prediction + reliability */}
                 {(prediction || reliability) && (
                   <div className="pred-box" onClick={e => e.stopPropagation()}>
                     {prediction && (
-                      <div style={{ display: "flex", flex: 1, flexDirection: "column", gap: 3 }}>
-                        <div style={{ fontSize: 10, color: "#555", letterSpacing: ".08em", textTransform: "uppercase" }}>
-                          Historical prediction
+                      <div style={{ display:"flex",flex:1,flexDirection:"column",gap:3 }}>
+                        <div style={{ fontSize:10,color:"#555",letterSpacing:".08em",textTransform:"uppercase" }}>Historical prediction</div>
+                        <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                          <span style={{ fontSize:14 }}>{prediction.dot}</span>
+                          <span style={{ fontSize:12,color:prediction.color }}>{prediction.label}</span>
+                          <span style={{ fontSize:10,color:"#444" }}>({histData?.total_reports} reports)</span>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: 14 }}>{prediction.dot}</span>
-                          <span style={{ fontSize: 12, color: prediction.color }}>{prediction.label}</span>
-                          <span style={{ fontSize: 10, color: "#444" }}>
-                            ({histData?.total_reports} reports)
-                          </span>
-                        </div>
-                        {/* Prediction bar */}
-                        <div style={{ background: "#1a1a1a", borderRadius: 4, height: 3, marginTop: 2, overflow: "hidden" }}>
-                          <div style={{ width: `${prediction.pct * 100}%`, height: "100%", background: prediction.color, borderRadius: 4, transition: "width .5s" }} />
+                        <div style={{ background:"#1a1a1a",borderRadius:4,height:3,marginTop:2,overflow:"hidden" }}>
+                          <div style={{ width:`${prediction.pct*100}%`,height:"100%",background:prediction.color,borderRadius:4,transition:"width .5s" }} />
                         </div>
                       </div>
                     )}
                     {reliability && (
-                      <div style={{ marginLeft: 12, textAlign: "right" }}>
-                        <div style={{ fontSize: 10, color: "#555", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 3 }}>Reliability</div>
-                        <span className="rel-box" style={{ background: `${reliability.color}18`, border: `1px solid ${reliability.color}44`, color: reliability.color }}>
+                      <div style={{ marginLeft:12,textAlign:"right" }}>
+                        <div style={{ fontSize:10,color:"#555",letterSpacing:".08em",textTransform:"uppercase",marginBottom:3 }}>Reliability</div>
+                        <span className="rel-box" style={{ background:`${reliability.color}18`,border:`1px solid ${reliability.color}44`,color:reliability.color }}>
                           {reliability.icon} {reliability.label}
                         </span>
                       </div>
@@ -475,9 +613,9 @@ export default function App() {
                 )}
 
                 {/* Actions */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12 }}
                   onClick={e => e.stopPropagation()}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <div style={{ display:"flex",gap:8,alignItems:"center" }}>
                     {mine
                       ? <><span className="pill mine-p">✓ I'm on this</span><button className="btn btn-leave" onClick={() => toggleBus(time)}>Leave</button></>
                       : <button className="btn btn-join" onClick={e => { e.stopPropagation(); toggleBus(time); }}>I'm taking this</button>}
@@ -490,18 +628,18 @@ export default function App() {
                 {/* Feedback panel */}
                 {fbOpen && (
                   <div className="fb-panel" onClick={e => e.stopPropagation()}>
-                    <div style={{ fontSize: 11, color: "#555", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 10 }}>
+                    <div style={{ fontSize:11,color:"#555",letterSpacing:".08em",textTransform:"uppercase",marginBottom:10 }}>
                       How was the bus? · Helps future predictions
                     </div>
                     {FEEDBACK_OPTIONS.map(opt => {
                       const votes = fbData[opt.id] || 0;
                       const selected = myFb === opt.id;
                       return (
-                        <div key={opt.id} className={`fb-opt ${selected ? "selected" : ""}`} onClick={() => submitFeedback(time, opt.id)}>
-                          <span style={{ fontSize: 16 }}>{opt.icon}</span>
-                          <span style={{ flex: 1 }}>{opt.label}</span>
-                          {votes > 0 && <span style={{ fontSize: 11, color: "#555", background: "#1a1a1a", padding: "2px 8px", borderRadius: 50 }}>{votes}</span>}
-                          {selected && <span style={{ fontSize: 12, color: "#f97316" }}>✓</span>}
+                        <div key={opt.id} className={`fb-opt ${selected?"selected":""}`} onClick={() => submitFeedback(time, opt.id)}>
+                          <span style={{ fontSize:16 }}>{opt.icon}</span>
+                          <span style={{ flex:1 }}>{opt.label}</span>
+                          {votes > 0 && <span style={{ fontSize:11,color:"#555",background:"#1a1a1a",padding:"2px 8px",borderRadius:50 }}>{votes}</span>}
+                          {selected && <span style={{ fontSize:12,color:"#f97316" }}>✓</span>}
                         </div>
                       );
                     })}
@@ -520,26 +658,26 @@ export default function App() {
             const histData = history[hkey] || null;
             const reliability = getReliability(histData);
             return (
-              <div key={key} className="card past" style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 18, color: "#f97316" }}>{time}</span>
-                  {double && <span className="pill double" style={{ fontSize: 9 }}>🚌🚌</span>}
+              <div key={key} className="card past" style={{ marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                  <span style={{ fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18,color:"#f97316" }}>{time}</span>
+                  {double && <span className="pill double" style={{ fontSize:9 }}>🚌🚌</span>}
                 </div>
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <div style={{ display:"flex",gap:10,alignItems:"center" }}>
                   {reliability && (
-                    <span className="rel-box" style={{ background: `${reliability.color}18`, border: `1px solid ${reliability.color}33`, color: reliability.color }}>
+                    <span className="rel-box" style={{ background:`${reliability.color}18`,border:`1px solid ${reliability.color}33`,color:reliability.color }}>
                       {reliability.icon} {reliability.label}
                     </span>
                   )}
-                  <span style={{ fontSize: 12, color: "#444" }}>{counts[key]?.count || 0} people</span>
+                  <span style={{ fontSize:12,color:"#444" }}>{counts[key]?.count || 0} people</span>
                 </div>
               </div>
             );
           })}
         </>}
 
-        <div style={{ marginTop: 32, fontSize: 10, color: "#222", textAlign: "center", lineHeight: 2, letterSpacing: ".05em", textTransform: "uppercase" }}>
-          Live shared data · Predictions improve with feedback
+        <div style={{ marginTop:32,fontSize:10,color:"#222",textAlign:"center",lineHeight:2,letterSpacing:".05em",textTransform:"uppercase" }}>
+          Live shared data · ETA improves with reports
         </div>
       </div>
 
