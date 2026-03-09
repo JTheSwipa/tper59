@@ -292,8 +292,9 @@ export default function App() {
 
   // Auto-expand selected bus for current direction when direction changes
   useEffect(() => {
-    setExpanded(selected);
-  }, [direction, selected]);
+    const currentSelected = direction === "to" ? selectedTo : selectedFrom;
+    setExpanded(currentSelected);
+  }, [direction, selectedTo, selectedFrom]);
 
   const getSchedule = () => {
     const wd = isWeekday(), sat = isSaturday();
