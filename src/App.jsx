@@ -111,11 +111,11 @@ function LockScreen({ onUnlock }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", width: "100%", background: "#0f0a00", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Mono','Courier New',monospace", padding: 24 }}>
+    <div style={{ minHeight: "100vh", width: "100%", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Mono','Courier New',monospace", padding: 24 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        html,body,#root{width:100%;min-height:100vh;margin:0;padding:0;background:#0f0a00}
+        html,body,#root{width:100%;min-height:100vh;margin:0;padding:0;background:#0a0a0a}
         @keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
         .shake{animation:shake .4s ease}
         @keyframes fadein{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
@@ -123,7 +123,7 @@ function LockScreen({ onUnlock }) {
       `}</style>
       <div className="lock-box" style={{ width: "100%", maxWidth: 340, textAlign: "center" }}>
         <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 72, color: "#f97316", letterSpacing: "-0.03em", marginBottom: 4 }}>59</div>
-        <div style={{ fontSize: 11, color: "#5a3a1a", letterSpacing: ".15em", textTransform: "uppercase", marginBottom: 48 }}>TPER Bologna · Restricted Access</div>
+        <div style={{ fontSize: 11, color: "#888", letterSpacing: ".15em", textTransform: "uppercase", marginBottom: 48 }}>TPER Bologna · Restricted Access</div>
         <div style={{ fontSize: 32, marginBottom: 24 }}>🔑</div>
         <div className={shake ? "shake" : ""}>
           <input
@@ -131,7 +131,7 @@ function LockScreen({ onUnlock }) {
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && attempt()}
             placeholder="password" autoFocus
-            style={{ width: "100%", background: "#1a0f00", border: `1.5px solid ${error ? "#ef4444" : "#3a2000"}`, borderRadius: 10, padding: "14px 18px", color: "#f97316", fontSize: 16, fontFamily: "'DM Mono',monospace", letterSpacing: ".15em", outline: "none", textAlign: "center", transition: "border-color .2s", marginBottom: 12 }}
+            style={{ width: "100%", background: "#111", border: `1.5px solid ${error ? "#ef4444" : "#333"}`, borderRadius: 10, padding: "14px 18px", color: "#fff", fontSize: 16, fontFamily: "'DM Mono',monospace", letterSpacing: ".15em", outline: "none", textAlign: "center", transition: "border-color .2s", marginBottom: 12 }}
           />
           {error && <div style={{ fontSize: 12, color: "#ef4444", letterSpacing: ".05em", marginBottom: 12 }}>Wrong password. Try again.</div>}
           <button onClick={attempt}
@@ -139,7 +139,7 @@ function LockScreen({ onUnlock }) {
             Enter →
           </button>
         </div>
-        <div style={{ marginTop: 40, fontSize: 10, color: "#2a1500", letterSpacing: ".08em", textTransform: "uppercase" }}>Ask your group for the password</div>
+        <div style={{ marginTop: 40, fontSize: 10, color: "#444", letterSpacing: ".08em", textTransform: "uppercase" }}>Ask your group for the password</div>
       </div>
     </div>
   );
@@ -270,19 +270,19 @@ export default function App() {
   const dayLabel = isWeekday() ? "Mon–Fri" : isSaturday() ? "Saturday" : "Sunday";
 
   return (
-    <div style={{ minHeight: "100vh", width: "100%", background: "#0f0a00", fontFamily: "'DM Mono','Courier New',monospace", color: "#f0e0cc" }}>
+    <div style={{ minHeight: "100vh", width: "100%", background: "#0a0a0a", fontFamily: "'DM Mono','Courier New',monospace", color: "#e8e8e8" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        html,body,#root{width:100%;min-height:100vh;margin:0;padding:0;background:#0f0a00}
-        .card{background:#160e00;border:1px solid #2a1800;border-radius:14px;padding:16px 18px;transition:all .18s ease;position:relative}
-        .card.mine{border-color:#f97316;background:#1f1000}
-        .card.past{opacity:.3}
+        html,body,#root{width:100%;min-height:100vh;margin:0;padding:0;background:#0a0a0a}
+        .card{background:#111111;border:1px solid #222222;border-radius:14px;padding:16px 18px;transition:all .18s ease;position:relative}
+        .card.mine{border-color:#f97316;background:#1a0f00}
+        .card.past{opacity:.35}
         .card.upcoming{cursor:pointer}
-        .card.upcoming:hover{border-color:#3a2200;transform:translateY(-1px)}
-        .dir-btn{padding:9px 18px;border-radius:50px;border:1.5px solid #2a1800;background:transparent;color:#5a3a1a;font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;transition:all .15s;letter-spacing:.04em}
+        .card.upcoming:hover{border-color:#444444;transform:translateY(-1px)}
+        .dir-btn{padding:9px 18px;border-radius:50px;border:1.5px solid #333;background:transparent;color:#888;font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;transition:all .15s;letter-spacing:.04em}
         .dir-btn.active{background:#f97316;border-color:#f97316;color:#000;font-weight:bold}
-        .bar-bg{background:#1f1200;border-radius:4px;height:5px;overflow:hidden;margin-top:10px}
+        .bar-bg{background:#222;border-radius:4px;height:5px;overflow:hidden;margin-top:10px}
         .bar-fill{height:100%;border-radius:4px;transition:width .5s ease}
         .pill{font-size:10px;padding:2px 9px;border-radius:50px;letter-spacing:.07em;text-transform:uppercase}
         .pill.next{background:#f9731622;color:#f97316;border:1px solid #f9731644}
@@ -293,30 +293,30 @@ export default function App() {
         .btn-join:hover{background:#f9731622}
         .btn-leave{color:#ef4444;background:transparent;border-color:#ef444455}
         .btn-leave:hover{background:#ef444422}
-        .btn-fb{color:#5a3a1a;background:transparent;border-color:#2a1800;font-size:11px}
-        .btn-fb:hover{border-color:#4a2800;color:#8a5a2a}
-        .fb-panel{background:#120900;border:1px solid #2a1800;border-radius:12px;padding:14px;margin-top:10px}
-        .fb-opt{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;transition:background .12s;border:1px solid transparent;font-size:13px;color:#c07840}
-        .fb-opt:hover{background:#1f1000;border-color:#3a2200}
+        .btn-fb{color:#666;background:transparent;border-color:#333;font-size:11px}
+        .btn-fb:hover{border-color:#555;color:#999}
+        .fb-panel{background:#0d0d0d;border:1px solid #222;border-radius:12px;padding:14px;margin-top:10px}
+        .fb-opt{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;transition:background .12s;border:1px solid transparent;font-size:13px;color:#ccc}
+        .fb-opt:hover{background:#1a1a1a;border-color:#333}
         .fb-opt.selected{background:#f9731618;border-color:#f9731644;color:#f97316}
-        .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f1000;border:1px solid #f9731644;color:#f97316;padding:10px 20px;border-radius:50px;font-size:12px;letter-spacing:.05em;animation:fadeup .3s ease;z-index:100;white-space:nowrap}
+        .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;border:1px solid #f9731644;color:#f97316;padding:10px 20px;border-radius:50px;font-size:12px;letter-spacing:.05em;animation:fadeup .3s ease;z-index:100;white-space:nowrap}
         @keyframes fadeup{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
         .pulse{animation:pulse 2s infinite}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-        .section-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:#3a2200;margin:22px 0 10px}
+        .section-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:#555;margin:22px 0 10px}
       `}</style>
 
-      <div style={{ background: "#120900", borderBottom: "1px solid #2a1500", padding: "18px 20px 14px", width: "100%" }}>
+      <div style={{ background: "#0f0f0f", borderBottom: "1px solid #222", padding: "18px 20px 14px", width: "100%" }}>
         <div style={{ maxWidth: 500, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
             <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 36, color: "#f97316", letterSpacing: "-0.03em" }}>59</span>
             <div>
-              <div style={{ fontSize: 13, color: "#8a5a2a" }}>TPER Bologna</div>
-              <div style={{ fontSize: 10, color: "#3a2200", letterSpacing: ".1em", textTransform: "uppercase" }}>{dayLabel} · live</div>
+              <div style={{ fontSize: 13, color: "#e8e8e8" }}>TPER Bologna</div>
+              <div style={{ fontSize: 10, color: "#888", letterSpacing: ".1em", textTransform: "uppercase" }}>{dayLabel} · live</div>
             </div>
           </div>
           <button onClick={() => { try { sessionStorage.removeItem("bus59_auth"); } catch {} setUnlocked(false); }}
-            style={{ background: "transparent", border: "1px solid #2a1800", borderRadius: 8, padding: "6px 12px", color: "#3a2200", fontSize: 11, cursor: "pointer", fontFamily: "'DM Mono',monospace", letterSpacing: ".05em" }}>
+            style={{ background: "transparent", border: "1px solid #333", borderRadius: 8, padding: "6px 12px", color: "#888", fontSize: 11, cursor: "pointer", fontFamily: "'DM Mono',monospace", letterSpacing: ".05em" }}>
             sign out
           </button>
         </div>
@@ -358,7 +358,7 @@ export default function App() {
                       {isNext && <span className="pill next pulse">next</span>}
                       {double && <span className="pill double">🚌🚌 double</span>}
                     </div>
-                    <div style={{ fontSize: 11, color: "#5a3a1a" }}>
+                    <div style={{ fontSize: 11, color: "#888" }}>
                       {minsLeft <= 0 ? "⚡ departing" : `in ${minsLeft} min`} · {count}/{cap} people
                     </div>
                   </div>
@@ -382,7 +382,7 @@ export default function App() {
                 </div>
                 {fbOpen && (
                   <div className="fb-panel" onClick={e => e.stopPropagation()}>
-                    <div style={{ fontSize: 11, color: "#5a3a1a", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 10 }}>How was the bus?</div>
+                    <div style={{ fontSize: 11, color: "#888", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 10 }}>How was the bus?</div>
                     {FEEDBACK_OPTIONS.map(opt => {
                       const votes = fbData[opt.id] || 0;
                       const selected = myFb === opt.id;
@@ -390,7 +390,7 @@ export default function App() {
                         <div key={opt.id} className={`fb-opt ${selected ? "selected" : ""}`} onClick={() => submitFeedback(time, opt.id)}>
                           <span style={{ fontSize: 16 }}>{opt.icon}</span>
                           <span style={{ flex: 1 }}>{opt.label}</span>
-                          {votes > 0 && <span style={{ fontSize: 11, color: "#5a3a1a", background: "#1f1000", padding: "2px 8px", borderRadius: 50 }}>{votes}</span>}
+                          {votes > 0 && <span style={{ fontSize: 11, color: "#888", background: "#1a1a1a", padding: "2px 8px", borderRadius: 50 }}>{votes}</span>}
                           {selected && <span style={{ fontSize: 12, color: "#f97316" }}>✓</span>}
                         </div>
                       );
@@ -416,15 +416,15 @@ export default function App() {
                   {double && <span className="pill double" style={{ fontSize: 9 }}>🚌🚌</span>}
                 </div>
                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                  {totalFb > 0 && <span style={{ fontSize: 11, color: "#3a2200" }}>{totalFb} fb</span>}
-                  <span style={{ fontSize: 12, color: "#3a2200" }}>{counts[key]?.count || 0} people</span>
+                  {totalFb > 0 && <span style={{ fontSize: 11, color: "#555" }}>{totalFb} fb</span>}
+                  <span style={{ fontSize: 12, color: "#555" }}>{counts[key]?.count || 0} people</span>
                 </div>
               </div>
             );
           })}
         </>}
 
-        <div style={{ marginTop: 32, fontSize: 10, color: "#2a1500", textAlign: "center", lineHeight: 2, letterSpacing: ".05em", textTransform: "uppercase" }}>
+        <div style={{ marginTop: 32, fontSize: 10, color: "#555", textAlign: "center", lineHeight: 2, letterSpacing: ".05em", textTransform: "uppercase" }}>
           Live shared data · Capacity: 40 / 80 (double)
         </div>
       </div>
