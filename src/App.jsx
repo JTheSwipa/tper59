@@ -661,22 +661,6 @@ export default function App() {
                         </div>
                       </div>
                     </div>
-                    {(showArrivalButton || showTripButton) && (
-                      <div style={{ display:"flex",flexDirection:"column",gap:4,marginLeft:8 }}>
-                        {showArrivalButton && (
-                          <button className="btn btn-eta"
-                            onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="delay" ? null : { key, type:"delay" }); }}>
-                            🚌 Just arrived
-                          </button>
-                        )}
-                        {showTripButton && (
-                          <button className="btn btn-eta"
-                            onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="trip" ? null : { key, type:"trip" }); }}>
-                            🏁 Just got off
-                          </button>
-                        )}
-                      </div>
-                    )}
                   </div>
                   {etaPanelOpen && etaOpen?.type === "delay" && (
                     <div style={{ marginTop:12,paddingTop:12,borderTop:"1px solid #1e3a4a" }}>
@@ -704,6 +688,28 @@ export default function App() {
                     </div>
                   )}
                 </div>
+
+                {(showArrivalButton || showTripButton) && (
+                  <div style={{ background:"#0d1a22",border:"1px solid #1e3a4a",borderRadius:8,padding:12,marginTop:8 }} onClick={e => e.stopPropagation()}>
+                    <div style={{ fontSize:10,color:"#38bdf8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:10 }}>Report departure & arrival</div>
+                    <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                      {showArrivalButton && (
+                        <button className="btn btn-eta"
+                          onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="delay" ? null : { key, type:"delay" }); }}
+                          style={{ width:"100%",justifyContent:"center",fontSize:12,padding:"8px 12px" }}>
+                          🚌 Just arrived
+                        </button>
+                      )}
+                      {showTripButton && (
+                        <button className="btn btn-eta"
+                          onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="trip" ? null : { key, type:"trip" }); }}
+                          style={{ width:"100%",justifyContent:"center",fontSize:12,padding:"8px 12px" }}>
+                          🏁 Just got off
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {(prediction || reliability) && (
                   <div className="pred-box" onClick={e => e.stopPropagation()}>
