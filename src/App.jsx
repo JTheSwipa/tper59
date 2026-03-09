@@ -523,16 +523,16 @@ export default function App() {
           <div style={{ background:"#0d1a22",border:"1px solid #1e3a4a",borderRadius:12,padding:14,marginBottom:18 }}>
             <div style={{ fontSize:10,color:"#444",letterSpacing:".08em",textTransform:"uppercase",marginBottom:10 }}>Your trip</div>
             <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-              {[selectedTo, selectedFrom].map((time, idx) => {
-                const dir = idx === 0 ? "to" : "from";
-                const dir2 = dir === "to" ? "from" : "to";
-                const sch = dir === "to" ? WEEKDAY_TO_VILLA : WEEKDAY_FROM_VILLA;  // simplified for now
-                const bus = sch.find(b => b.time === time);
+              {[{t:selectedTo,d:"to"}, {t:selectedFrom,d:"from"}].map(({t:time, d:dir}) => {
                 const key = `${dir}:${time}`;
                 const sid = `${dir}:${time}`;
+                const wd = isWeekday(), sat = isSaturday();
+                const sch = dir === "to" ? (wd ? WEEKDAY_TO_VILLA : sat ? SAT_TO_VILLA : []) : (wd ? WEEKDAY_FROM_VILLA : sat ? SAT_FROM_VILLA : []);
+                const bus = sch.find(b => b.time === time);
+                if (!bus) return null;
                 const count = counts[key]?.count || 0;
-                const cap = bus?.double ? CAPACITY * 2 : CAPACITY;
-                const occ = occupancyInfo(count, bus?.double);
+                const cap = bus.double ? CAPACITY * 2 : CAPACITY;
+                const occ = occupancyInfo(count, bus.double);
                 const eta = getETA(arrivalRows, sid, dir, time);
                 return (
                   <div key={dir} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12 }}>
