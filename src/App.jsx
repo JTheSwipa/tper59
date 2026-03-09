@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 
-const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD;
+const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD || "demo59";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 
