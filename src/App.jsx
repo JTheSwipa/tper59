@@ -1,11 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 
-// 🔑 CHANGE THIS
-const APP_PASSWORD = "unibo2025";
-
-// 🗄️ PASTE YOUR SUPABASE DETAILS HERE
-const SUPABASE_URL = "https://kegaybjxbcvxtkflmdxe.supabase.co";
-const SUPABASE_KEY = "sb_publishable_QpN9v-S3sO-qQB616TtKNg_TohRlPGl";
+const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 
 function todayDate() {
   return new Date().toISOString().split("T")[0]; // "2026-03-10"
@@ -236,6 +233,7 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const [selectedTo, setSelectedTo] = useState(null);
   const [selectedFrom, setSelectedFrom] = useState(null);
+  const [expanded, setExpanded] = useState(null);
 
   useEffect(() => {
     try { if (localStorage.getItem("bus59_auth") === APP_PASSWORD) setUnlocked(true); } catch {}
@@ -431,16 +429,11 @@ export default function App() {
   if (!unlocked) return <LockScreen onUnlock={handleUnlock} />;
 
   // Focus mode logic
-  const selected = direction === "to" ? selectedTo : selectedFrom;
-  const setSelected = direction === "to" ? setSelectedTo : setSelectedFrom;
+  const selected = direction === "to" ? selectedTo : selectedFrom; // current booked choice for this direction
   const bothSelected = selectedTo && selectedFrom;
   
-  const handleSelectBus = (time) => {
-    if (selected === time) {
-      setSelected(null);
-    } else {
-      setSelected(time);
-    }
+  const handleExpand = (time) => {
+    setExpanded(prev => (prev === time ? null : time));
   };
 
   const schedule = getSchedule().sort((a, b) => timeToMins(a.time) - timeToMins(b.time));
@@ -517,6 +510,12 @@ export default function App() {
         </div>
 
         {!isWeekday() && !isSaturday() && <div style={{ color:"#ef4444",fontSize:14 }}>No service on Sundays.</div>}
+        {(selectedTo || selectedFrom) && !bothSelected && (
+          <div style={{ fontSize:12,color:"#aaa",margin:"10px 0" }}>
+            {selectedTo && "Outbound selected – switch direction to choose a return bus."}
+            {selectedFrom && "Return selected – switch direction to choose your outbound bus."}
+          </div>
+        )}
 
         {/* Summary view when both directions selected */}
         {bothSelected && (
@@ -574,13 +573,13 @@ export default function App() {
             const showArrivalButton = Math.abs(minsLeft) <= 20;
             const showTripButton = minsLeft <= -7 && minsLeft >= -60;
             const etaPanelOpen = etaOpen?.key === key;
-            const isSelected = selected === time;
+            const isExpanded = expanded === time;
 
             // Compact card (browse mode or collapsed when another selected)
-            if (!selected && !isSelected) {
+            if (!expanded && !isExpanded) {
               return (
                 <div key={key} className={`card upcoming ${mine?"mine":""}`} style={{ marginBottom:8,cursor:"pointer",padding:"12px 14px" }}
-                  onClick={() => handleSelectBus(time)}>
+                  onClick={() => handleExpand(time)}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                     <div style={{ display:"flex",alignItems:"center",gap:12,flex:1 }}>
                       <span style={{ fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:20,color:"#f97316" }}>{time}</span>
@@ -597,10 +596,10 @@ export default function App() {
             }
 
             // One-line card (other card when this one selected)
-            if (selected && !isSelected) {
+            if (expanded && !isExpanded) {
               return (
                 <div key={key} className="card upcoming" style={{ marginBottom:6,opacity:0.5,padding:"10px 14px",cursor:"pointer" }}
-                  onClick={() => handleSelectBus(time)}>
+                  onClick={() => handleExpand(time)}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11 }}>
                     <span style={{ color:"#f97316",fontWeight:"bold" }}>{time}</span>
                     <span style={{ color:"#666" }}>{occ.dot} {occ.label}</span>
@@ -612,8 +611,8 @@ export default function App() {
             // Full card (selected mode)
             return (
               <div key={key} className={`card upcoming ${mine?"mine":""}`} style={{ marginBottom:10 }}>
-                {selected && (
-                  <button onClick={() => handleSelectBus(time)} style={{ display:"block",margin:"0 0 12px",background:"transparent",border:"none",color:"#666",fontSize:11,cursor:"pointer",fontFamily:"'DM Mono',monospace" }}>
+                {expanded && (
+                  <button onClick={() => handleExpand(time)} style={{ display:"block",margin:"0 0 12px",background:"transparent",border:"none",color:"#666",fontSize:11,cursor:"pointer",fontFamily:"'DM Mono',monospace" }}>
                     ← Back to buses
                   </button>
                 )}
@@ -741,8 +740,8 @@ export default function App() {
                   onClick={e => e.stopPropagation()}>
                   <div style={{ display:"flex",gap:8,alignItems:"center" }}>
                     {mine
-                      ? <><span className="pill mine-p">✓ I'm on this</span><button className="btn btn-leave" onClick={() => toggleBus(time)}>Leave</button></>
-                      : <button className="btn btn-join" onClick={e => { e.stopPropagation(); toggleBus(time); }}>I'm taking this</button>}
+                      ? <><span className="pill mine-p">✓ I'm on this</span><button className="btn btn-leave" onClick={() => { toggleBus(time); if (selected === time) { if (direction === "to") setSelectedTo(null); else setSelectedFrom(null); } }}>Leave</button></>
+                      : <button className="btn btn-join" onClick={e => { e.stopPropagation(); toggleBus(time); if (direction === "to") setSelectedTo(time); else setSelectedFrom(time); }}>I'm taking this</button>}
                   </div>
                   <button className="btn btn-fb" onClick={e => { e.stopPropagation(); setFeedbackOpen(fbOpen ? null : key); }}>
                     {totalFb > 0 ? `${totalFb} feedback` : "Give feedback"} ›
