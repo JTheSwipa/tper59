@@ -518,50 +518,8 @@ export default function App() {
         {!isWeekday() && !isSaturday() && <div style={{ color:"#ef4444",fontSize:14 }}>No service on Sundays.</div>}
         {(selectedTo || selectedFrom) && !bothSelected && (
           <div style={{ fontSize:12,color:"#aaa",margin:"10px 0" }}>
-            {selectedTo && "Outbound selected – switch direction to choose a return bus."}
-            {selectedFrom && "Return selected – switch direction to choose your outbound bus."}
-          </div>
-        )}
-
-        {/* Summary view when both directions selected */}
-        {bothSelected && (
-          <div style={{ background:"linear-gradient(135deg, #0d1a22 0%, #0f2438 100%)",border:"2px solid #38bdf8",borderRadius:16,padding:20,marginBottom:20,boxShadow:"0 8px 32px rgba(56,189,248,.1)" }}>
-            <div style={{ fontSize:11,color:"#38bdf8",letterSpacing:".12em",textTransform:"uppercase",marginBottom:16,fontWeight:"bold" }}>📋 Your Trip Summary</div>
-            <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-              {[{t:selectedTo,d:"to"}, {t:selectedFrom,d:"from"}].map(({t:time, d:dir}) => {
-                const key = `${dir}:${time}`;
-                const sid = `${dir}:${time}`;
-                const wd = isWeekday(), sat = isSaturday();
-                const sch = dir === "to" ? (wd ? WEEKDAY_TO_VILLA : sat ? SAT_TO_VILLA : []) : (wd ? WEEKDAY_FROM_VILLA : sat ? SAT_FROM_VILLA : []);
-                const bus = sch.find(b => b.time === time);
-                if (!bus) return null;
-                const count = counts[key]?.count || 0;
-                const cap = bus.double ? CAPACITY * 2 : CAPACITY;
-                const occ = occupancyInfo(count, bus.double);
-                const eta = getETA(arrivalRows, sid, dir, time);
-                return (
-                  <div key={dir} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,background:"#0a1419",padding:12,borderRadius:10,border:"1px solid #1e3a4a" }}>
-                    <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                      <span style={{ fontSize:16,fontWeight:"bold",color:"#f97316" }}>{dir === "to" ? "→" : "←"}</span>
-                      <div style={{ display:"flex",flexDirection:"column",gap:2 }}>
-                        <span style={{ color:"#ccc",fontWeight:"bold" }}>{dir === "to" ? "P. Cavour" : "Villa"}</span>
-                        <span style={{ fontSize:11,color:"#666" }}>Depart {time}</span>
-                      </div>
-                    </div>
-                    <div style={{ display:"flex",alignItems:"center",gap:8,textAlign:"right" }}>
-                      <div>
-                        <div style={{ fontSize:11,color:"#666",marginBottom:2 }}>Arrive</div>
-                        <div style={{ fontSize:14,fontWeight:"bold",color:"#4ade80" }}>~{eta.estArrivalAtStop}</div>
-                      </div>
-                      <span style={{ fontSize:18 }}>{occ.dot}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <button onClick={() => { setSelectedTo(null); setSelectedFrom(null); }} style={{ width:"100%",marginTop:16,background:"#f97316",border:"none",borderRadius:10,padding:12,color:"#000",fontSize:12,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:"bold",letterSpacing:".05em",textTransform:"uppercase" }}>
-              ✎ Change Selection
-            </button>
+            {selectedTo && "You selected a trip from P. Cavour"}
+            {selectedFrom && "You selected a trip from Villa"}
           </div>
         )}
 
