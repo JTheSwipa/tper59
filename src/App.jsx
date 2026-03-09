@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 
-const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD || "demo59";
+const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD;
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 
@@ -290,6 +290,11 @@ export default function App() {
     } catch {}
   }, [unlocked]);
 
+  // Auto-expand selected bus for current direction when direction changes
+  useEffect(() => {
+    setExpanded(selected);
+  }, [direction, selected]);
+
   const getSchedule = () => {
     const wd = isWeekday(), sat = isSaturday();
     if (!wd && !sat) return [];
@@ -519,9 +524,9 @@ export default function App() {
 
         {/* Summary view when both directions selected */}
         {bothSelected && (
-          <div style={{ background:"#0d1a22",border:"1px solid #1e3a4a",borderRadius:12,padding:14,marginBottom:18 }}>
-            <div style={{ fontSize:10,color:"#444",letterSpacing:".08em",textTransform:"uppercase",marginBottom:10 }}>Your trip</div>
-            <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+          <div style={{ background:"linear-gradient(135deg, #0d1a22 0%, #0f2438 100%)",border:"2px solid #38bdf8",borderRadius:16,padding:20,marginBottom:20,boxShadow:"0 8px 32px rgba(56,189,248,.1)" }}>
+            <div style={{ fontSize:11,color:"#38bdf8",letterSpacing:".12em",textTransform:"uppercase",marginBottom:16,fontWeight:"bold" }}>📋 Your Trip Summary</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
               {[{t:selectedTo,d:"to"}, {t:selectedFrom,d:"from"}].map(({t:time, d:dir}) => {
                 const key = `${dir}:${time}`;
                 const sid = `${dir}:${time}`;
@@ -534,17 +539,27 @@ export default function App() {
                 const occ = occupancyInfo(count, bus.double);
                 const eta = getETA(arrivalRows, sid, dir, time);
                 return (
-                  <div key={dir} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12 }}>
-                    <span style={{ color:"#aaa" }}>{dir === "to" ? "→" : "←"} {dir === "to" ? "P. Cavour" : "Villa"}</span>
-                    <span style={{ fontWeight:"bold",minWidth:40 }}>{time}</span>
-                    <span style={{ color:"#666" }}>~{eta.estArrivalAtStop}</span>
-                    <span style={{ fontSize:14 }}>{occ.dot}</span>
+                  <div key={dir} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,background:"#0a1419",padding:12,borderRadius:10,border:"1px solid #1e3a4a" }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                      <span style={{ fontSize:16,fontWeight:"bold",color:"#f97316" }}>{dir === "to" ? "→" : "←"}</span>
+                      <div style={{ display:"flex",flexDirection:"column",gap:2 }}>
+                        <span style={{ color:"#ccc",fontWeight:"bold" }}>{dir === "to" ? "P. Cavour" : "Villa"}</span>
+                        <span style={{ fontSize:11,color:"#666" }}>Depart {time}</span>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex",alignItems:"center",gap:8,textAlign:"right" }}>
+                      <div>
+                        <div style={{ fontSize:11,color:"#666",marginBottom:2 }}>Arrive</div>
+                        <div style={{ fontSize:14,fontWeight:"bold",color:"#4ade80" }}>~{eta.estArrivalAtStop}</div>
+                      </div>
+                      <span style={{ fontSize:18 }}>{occ.dot}</span>
+                    </div>
                   </div>
                 );
               })}
             </div>
-            <button onClick={() => { setSelectedTo(null); setSelectedFrom(null); }} style={{ width:"100%",marginTop:10,background:"transparent",border:"1px solid #444",borderRadius:8,padding:8,color:"#888",fontSize:11,cursor:"pointer",fontFamily:"'DM Mono',monospace" }}>
-              Change →
+            <button onClick={() => { setSelectedTo(null); setSelectedFrom(null); }} style={{ width:"100%",marginTop:16,background:"#f97316",border:"none",borderRadius:10,padding:12,color:"#000",fontSize:12,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:"bold",letterSpacing:".05em",textTransform:"uppercase" }}>
+              ✎ Change Selection
             </button>
           </div>
         )}
