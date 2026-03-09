@@ -182,11 +182,11 @@ export default function App() {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    try { if (sessionStorage.getItem("bus59_auth") === APP_PASSWORD) setUnlocked(true); } catch {}
+    try { if (localStorage.getItem("bus59_auth") === APP_PASSWORD) setUnlocked(true); } catch {}
   }, []);
 
   const handleUnlock = () => {
-    try { sessionStorage.setItem("bus59_auth", APP_PASSWORD); } catch {}
+    try { localStorage.setItem("bus59_auth", APP_PASSWORD); } catch {}
     setUnlocked(true);
   };
 
@@ -222,10 +222,18 @@ export default function App() {
   useEffect(() => {
     if (!unlocked) return;
     try {
-      const b = sessionStorage.getItem("mybus59"); if (b) setMyBus(b);
-      const f = sessionStorage.getItem("myfeedbacks59"); if (f) setMyFeedbacks(JSON.parse(f));
+      const b = localStorage.getItem("mybus59"); if (b) setMyBus(b);
+      const f = localStorage.getItem("myfeedbacks59"); if (f) setMyFeedbacks(JSON.parse(f));
     } catch {}
   }, [unlocked]);
+
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === "mybus59") setMyBus(e.newValue || null);
+    };
+    window.addEventListener("storage", e => onStorage(e));
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   const getSchedule = () => {
     const wd = isWeekday(), sat = isSaturday();
@@ -247,7 +255,7 @@ export default function App() {
       const newCount = Math.max(0, existing - 1);
       setCounts(prev => ({ ...prev, [key]: { count: newCount } }));
       setMyBus(null);
-      try { sessionStorage.setItem("mybus59", ""); } catch {}
+      try { localStorage.setItem("mybus59", ""); } catch {}
       await sbUpsert("bus_counts", key, { count: newCount });
     } else {
       if (myBus && myBus !== key) {
@@ -258,7 +266,7 @@ export default function App() {
       const newCount = existing + 1;
       setCounts(prev => ({ ...prev, [key]: { count: newCount } }));
       setMyBus(key);
-      try { sessionStorage.setItem("mybus59", key); } catch {}
+      try { localStorage.setItem("mybus59", key); } catch {}
       await sbUpsert("bus_counts", key, { count: newCount });
       showToast("✓ Added to this bus");
     }
@@ -281,7 +289,7 @@ export default function App() {
       updatedHistory.total_reports = Math.max(0, updatedHistory.total_reports - 1);
       const newMy = { ...myFeedbacks }; delete newMy[myFbKey];
       setMyFeedbacks(newMy);
-      try { sessionStorage.setItem("myfeedbacks59", JSON.stringify(newMy)); } catch {}
+      try { localStorage.setItem("myfeedbacks59", JSON.stringify(newMy)); } catch {}
     } else {
       // Remove old feedback from history if switching
       const oldFb = myFeedbacks[myFbKey];
@@ -295,7 +303,7 @@ export default function App() {
       updatedHistory.total_reports = updatedHistory.total_reports + 1;
       const newMy = { ...myFeedbacks, [myFbKey]: fbId };
       setMyFeedbacks(newMy);
-      try { sessionStorage.setItem("myfeedbacks59", JSON.stringify(newMy)); } catch {}
+      try { localStorage.setItem("myfeedbacks59", JSON.stringify(newMy)); } catch {}
       showToast("Feedback saved — helps future predictions 📊");
     }
 
@@ -371,7 +379,7 @@ export default function App() {
               <div style={{ fontSize: 10, color: "#555", letterSpacing: ".1em", textTransform: "uppercase" }}>{dayLabel} · live</div>
             </div>
           </div>
-          <button onClick={() => { try { sessionStorage.removeItem("bus59_auth"); } catch {} setUnlocked(false); }}
+          <button onClick={() => { try { localStorage.removeItem("bus59_auth"); } catch {} setUnlocked(false); }}
             style={{ background: "transparent", border: "1px solid #222", borderRadius: 8, padding: "6px 12px", color: "#555", fontSize: 11, cursor: "pointer", fontFamily: "'DM Mono',monospace" }}>
             sign out
           </button>
