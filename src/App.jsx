@@ -481,8 +481,9 @@ export default function App() {
             const myFb = myFeedbacks[myFbKey];
             const totalFb = Object.values(fbData).reduce((a, b) => a + (Number(b)||0), 0);
             const fbOpen = feedbackOpen === key;
-            // Show ETA report buttons only within 20 min window of scheduled time
-            const showEtaButtons = Math.abs(minsLeft) <= 20;
+            // Show ETA report buttons with separate conditions
+            const showArrivalButton = Math.abs(minsLeft) <= 20;
+            const showTripButton = minsLeft <= -7 && minsLeft >= -60;
             const etaPanelOpen = etaOpen?.key === key;
 
             return (
@@ -535,16 +536,20 @@ export default function App() {
                         </div>
                       </div>
                     </div>
-                    {showEtaButtons && (
+                    {(showArrivalButton || showTripButton) && (
                       <div style={{ display:"flex",flexDirection:"column",gap:4,marginLeft:8 }}>
-                        <button className="btn btn-eta"
-                          onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="delay" ? null : { key, type:"delay" }); }}>
-                          🚌 Just arrived
-                        </button>
-                        <button className="btn btn-eta"
-                          onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="trip" ? null : { key, type:"trip" }); }}>
-                          🏁 Just got off
-                        </button>
+                        {showArrivalButton && (
+                          <button className="btn btn-eta"
+                            onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="delay" ? null : { key, type:"delay" }); }}>
+                            🚌 Just arrived
+                          </button>
+                        )}
+                        {showTripButton && (
+                          <button className="btn btn-eta"
+                            onClick={e => { e.stopPropagation(); setEtaOpen(etaPanelOpen && etaOpen?.type==="trip" ? null : { key, type:"trip" }); }}>
+                            🏁 Just got off
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
